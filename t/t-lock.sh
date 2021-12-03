@@ -6,7 +6,7 @@ begin_test "lock with good ref"
 (
   set -e
 
-  reponame="lock-master-branch-required"
+  reponame="lock-main-branch-required"
   setup_remote_repo_with_file "$reponame" "a.dat"
   clone_repo "$reponame" "$reponame"
 
@@ -17,7 +17,7 @@ begin_test "lock with good ref"
   fi
 
   id=$(assert_lock lock.json a.dat)
-  assert_server_lock "$reponame" "$id" "refs/heads/master"
+  assert_server_lock "$reponame" "$id" "refs/heads/main"
 )
 end_test
 
@@ -35,8 +35,9 @@ begin_test "lock with good tracked ref"
   git commit -m "add a.dat"
 
   git config push.default upstream
-  git config branch.master.merge refs/heads/tracked
-  git push origin master
+  git config branch.main.merge refs/heads/tracked
+  git config branch.main.remote origin
+  git push origin main
 
   git lfs lock "a.dat" --json 2>&1 | tee lock.json
   if [ "0" -ne "${PIPESTATUS[0]}" ]; then
@@ -61,7 +62,7 @@ begin_test "lock with bad ref"
   echo "a" > a.dat
   git add .gitattributes a.dat
   git commit -m "add a.dat"
-  git push origin master:other
+  git push origin main:other
 
   GIT_CURL_VERBOSE=1 git lfs lock "a.dat" 2>&1 | tee lock.json
   if [ "0" -eq "${PIPESTATUS[0]}" ]; then
@@ -69,7 +70,71 @@ begin_test "lock with bad ref"
     exit 1
   fi
 
-  grep 'Lock failed: Expected ref "refs/heads/other", got "refs/heads/master"' lock.json
+  grep 'Locking a.dat failed: Expected ref "refs/heads/other", got "refs/heads/main"' lock.json
+)
+end_test
+
+begin_test "lock multiple files"
+(
+  set -e
+
+  reponame="lock-multiple-files"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  echo "a" > a.dat
+  echo "b" > b.dat
+  git add .gitattributes a.dat b.dat
+  git commit -m "add dat files"
+  git push origin main:other
+
+  GIT_TRACE=0 git lfs lock *.dat >log 2>errlog
+  [ $(grep -c "Locked [ab].dat" log) -eq 2 ]
+  grep -v CREDS errlog && exit 1
+  grep "Usage:" errlog && exit 1
+  true
+)
+end_test
+
+begin_test "lock multiple files (JSON)"
+(
+  set -e
+
+  reponame="lock-multiple-files-json"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  echo "a" > a.dat
+  echo "b" > b.dat
+  git add .gitattributes a.dat b.dat
+  git commit -m "add dat files"
+  git push origin main:other
+
+  git lfs lock --json *.dat | tee lock.json
+  grep -E '\[\{"id":"[^"]+","path":"a\.dat","owner":\{"name":"Git LFS Tests"\},"locked_at":"[^"]+"\},\{"id":"[^"]+","path":"b\.dat","owner":\{"name":"Git LFS Tests"\},"locked_at":"[^"]+"\}\]' lock.json
+)
+end_test
+
+begin_test "lock absolute path"
+(
+  set -e
+
+  reponame="lock-absolute-path"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  echo "a" > a.dat
+  echo "b" > b.dat
+  git add .gitattributes a.dat b.dat
+  git commit -m "add dat files"
+  git push origin main:other
+
+  git lfs lock --json "$(pwd)/a.dat" | tee lock.json
+  id=$(assert_lock lock.json a.dat)
+  assert_server_lock "$reponame" "$id"
 )
 end_test
 
@@ -95,6 +160,20 @@ begin_test "creating a lock (with output)"
 
   git lfs lock "a_output.dat" | tee lock.log
   grep "Locked a_output.dat" lock.log
+  id=$(grep -oh "\((.*)\)" lock.log | tr -d \(\))
+  assert_server_lock "$reponame" "$id"
+)
+end_test
+
+begin_test "locking a file that doesn't exist"
+(
+  set -e
+
+  reponame="lock_create_nonexistent"
+  setup_remote_repo_with_file "$reponame" "a_output.dat"
+
+  git lfs lock "b_output.dat" | tee lock.log
+  grep "Locked b_output.dat" lock.log
   id=$(grep -oh "\((.*)\)" lock.log | tr -d \(\))
   assert_server_lock "$reponame" "$id"
 )
@@ -130,13 +209,13 @@ begin_test "locking a directory"
   git add dir/a.dat .gitattributes
 
   git commit -m "add dir/a.dat" | tee commit.log
-  grep "master (root-commit)" commit.log
+  grep "main (root-commit)" commit.log
   grep "2 files changed" commit.log
   grep "create mode 100644 dir/a.dat" commit.log
   grep "create mode 100644 .gitattributes" commit.log
 
-  git push origin master 2>&1 | tee push.log
-  grep "master -> master" push.log
+  git push origin main 2>&1 | tee push.log
+  grep "main -> main" push.log
 
   git lfs lock ./dir/ 2>&1 | tee lock.log
   grep "cannot lock directory" lock.log
@@ -164,7 +243,7 @@ begin_test "locking a nested file"
   git add foo/bar/baz/a.dat
   git commit -m "add a.dat"
 
-  git push origin master
+  git push origin main
 
   assert_server_object "$reponame" "$contents_oid"
 
@@ -216,7 +295,7 @@ begin_test "creating a lock (symlinked working directory)"
 
   git add --all .
   git commit -m "initial commit"
-  git push origin master
+  git push origin main
 
   pushd "$TRASHDIR" > /dev/null
     ln -s "$reponame" "$reponame-symlink"
@@ -225,7 +304,7 @@ begin_test "creating a lock (symlinked working directory)"
     git lfs lock --json folder1/folder2/a.dat 2>&1 | tee lock.json
 
     id="$(assert_lock lock.json folder1/folder2/a.dat)"
-    assert_server_lock "$reponame" "$id" master
+    assert_server_lock "$reponame" "$id" main
   popd > /dev/null
 )
 end_test
@@ -277,5 +356,25 @@ begin_test "lock with .gitignore and lfs.lockignoredfiles"
   git commit -m ".gitignore: ignore 'a.txt'"
   rm -f a.txt && git checkout a.txt
   refute_file_writeable a.txt
+)
+end_test
+
+begin_test "lock with git-lfs-transfer"
+(
+  set -e
+
+  setup_pure_ssh
+
+  reponame="lock-with-git-lfs-transfer"
+  setup_remote_repo_with_file "$reponame" "f.dat"
+  clone_repo "$reponame" "$reponame"
+
+  sshurl=$(ssh_remote "$reponame")
+  git config lfs.url "$sshurl"
+
+  GIT_TRACE_PACKET=1 git lfs lock --json "f.dat" | tee lock.log
+
+  id=$(assert_lock lock.log f.dat)
+  assert_server_lock_ssh "$reponame" "$id" "refs/heads/main"
 )
 end_test

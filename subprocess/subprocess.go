@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/rubyist/tracerx"
 )
@@ -46,7 +47,6 @@ func BufferedExec(name string, args ...string) (*BufferedCmd, error) {
 
 // SimpleExec is a small wrapper around os/exec.Command.
 func SimpleExec(name string, args ...string) (string, error) {
-	Trace(name, args...)
 	return Output(ExecCommand(name, args...))
 }
 
@@ -127,18 +127,52 @@ func quotedArgs(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// An env for an exec.Command without GIT_TRACE
+// An env for an exec.Command without GIT_TRACE and GIT_INTERNAL_SUPER_PREFIX
 var env []string
+var envMu sync.Mutex
 var traceEnv = "GIT_TRACE="
 
-func init() {
+// Don't pass GIT_INTERNAL_SUPER_PREFIX back to Git. Git passes this environment
+// variable to child processes when submodule.recurse is set to true. However,
+// passing that environment variable back to Git will cause it to append the
+// --super-prefix command-line option to every Git call. This is problematic
+// because many Git commands (including git config and git rev-parse) don't
+// support --super-prefix and would immediately exit with an error as a result.
+var superPrefixEnv = "GIT_INTERNAL_SUPER_PREFIX="
+
+func fetchEnvironment() []string {
+	envMu.Lock()
+	defer envMu.Unlock()
+
+	return fetchEnvironmentInternal()
+}
+
+// fetchEnvironmentInternal should only be called from fetchEnvironment or
+// ResetEnvironment, who will hold the required lock.
+func fetchEnvironmentInternal() []string {
+	if env != nil {
+		return env
+	}
+
 	realEnv := os.Environ()
 	env = make([]string, 0, len(realEnv))
 
 	for _, kv := range realEnv {
-		if strings.HasPrefix(kv, traceEnv) {
+		if strings.HasPrefix(kv, traceEnv) || strings.HasPrefix(kv, superPrefixEnv) {
 			continue
 		}
 		env = append(env, kv)
 	}
+	return env
+}
+
+// ResetEnvironment resets the cached environment that's used in subprocess
+// calls.
+func ResetEnvironment() {
+	envMu.Lock()
+	defer envMu.Unlock()
+
+	env = nil
+	// Reinitialize the environment settings.
+	fetchEnvironmentInternal()
 }

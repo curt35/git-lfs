@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
 	"github.com/rubyist/tracerx"
 )
 
@@ -92,7 +92,7 @@ func (s *GitScanner) ScanRangeToRemote(left, right string, cb GitScannerFoundPoi
 	}
 	s.mu.Unlock()
 
-	return scanLeftRightToChan(s, callback, left, right, s.cfg.OSEnv(), s.opts(ScanRangeToRemoteMode))
+	return scanLeftRightToChan(s, callback, left, right, s.cfg.GitEnv(), s.cfg.OSEnv(), s.opts(ScanRangeToRemoteMode))
 }
 
 // ScanMultiRangeToRemote scans through all commits starting at the left ref but
@@ -111,7 +111,7 @@ func (s *GitScanner) ScanMultiRangeToRemote(left string, rights []string, cb Git
 	}
 	s.mu.Unlock()
 
-	return scanMultiLeftRightToChan(s, callback, left, rights, s.cfg.OSEnv(), s.opts(ScanRangeToRemoteMode))
+	return scanMultiLeftRightToChan(s, callback, left, rights, s.cfg.GitEnv(), s.cfg.OSEnv(), s.opts(ScanRangeToRemoteMode))
 }
 
 // ScanRefs through all commits reachable by refs contained in "include" and
@@ -124,7 +124,7 @@ func (s *GitScanner) ScanRefs(include, exclude []string, cb GitScannerFoundPoint
 
 	opts := s.opts(ScanRefsMode)
 	opts.SkipDeletedBlobs = false
-	return scanRefsToChan(s, callback, include, exclude, s.cfg.OSEnv(), opts)
+	return scanRefsToChan(s, callback, include, exclude, s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
 }
 
 // ScanRefRange scans through all commits from the given left and right refs,
@@ -137,7 +137,21 @@ func (s *GitScanner) ScanRefRange(left, right string, cb GitScannerFoundPointer)
 
 	opts := s.opts(ScanRefsMode)
 	opts.SkipDeletedBlobs = false
-	return scanLeftRightToChan(s, callback, left, right, s.cfg.OSEnv(), opts)
+	return scanLeftRightToChan(s, callback, left, right, s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
+}
+
+// ScanRefRangeByTree scans through all trees from the given left and right
+// refs.
+func (s *GitScanner) ScanRefRangeByTree(left, right string, cb GitScannerFoundPointer) error {
+	callback, err := firstGitScannerCallback(cb, s.FoundPointer)
+	if err != nil {
+		return err
+	}
+
+	opts := s.opts(ScanRefsMode)
+	opts.SkipDeletedBlobs = false
+	opts.CommitsOnly = true
+	return scanRefsByTree(s, callback, []string{right}, []string{left}, s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
 }
 
 // ScanRefWithDeleted scans through all objects in the given ref, including
@@ -156,7 +170,20 @@ func (s *GitScanner) ScanRef(ref string, cb GitScannerFoundPointer) error {
 
 	opts := s.opts(ScanRefsMode)
 	opts.SkipDeletedBlobs = true
-	return scanLeftRightToChan(s, callback, ref, "", s.cfg.OSEnv(), opts)
+	return scanLeftRightToChan(s, callback, ref, "", s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
+}
+
+// ScanRefByTree scans through all trees in the current ref.
+func (s *GitScanner) ScanRefByTree(ref string, cb GitScannerFoundPointer) error {
+	callback, err := firstGitScannerCallback(cb, s.FoundPointer)
+	if err != nil {
+		return err
+	}
+
+	opts := s.opts(ScanRefsMode)
+	opts.SkipDeletedBlobs = true
+	opts.CommitsOnly = true
+	return scanRefsByTree(s, callback, []string{ref}, []string{}, s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
 }
 
 // ScanAll scans through all objects in the git repository.
@@ -168,7 +195,7 @@ func (s *GitScanner) ScanAll(cb GitScannerFoundPointer) error {
 
 	opts := s.opts(ScanAllMode)
 	opts.SkipDeletedBlobs = false
-	return scanLeftRightToChan(s, callback, "", "", s.cfg.OSEnv(), opts)
+	return scanLeftRightToChan(s, callback, "", "", s.cfg.GitEnv(), s.cfg.OSEnv(), opts)
 }
 
 // ScanTree takes a ref and returns WrappedPointer objects in the tree at that
@@ -179,7 +206,7 @@ func (s *GitScanner) ScanTree(ref string) error {
 	if err != nil {
 		return err
 	}
-	return runScanTree(callback, ref, s.Filter, s.cfg.OSEnv())
+	return runScanTree(callback, ref, s.Filter, s.cfg.GitEnv(), s.cfg.OSEnv())
 }
 
 // ScanUnpushed scans history for all LFS pointers which have been added but not
@@ -190,6 +217,16 @@ func (s *GitScanner) ScanUnpushed(remote string, cb GitScannerFoundPointer) erro
 		return err
 	}
 	return scanUnpushed(callback, remote)
+}
+
+// ScanStashed scans for all LFS pointers referenced solely by a stash
+func (s *GitScanner) ScanStashed(cb GitScannerFoundPointer) error {
+	callback, err := firstGitScannerCallback(cb, s.FoundPointer)
+	if err != nil {
+		return err
+	}
+
+	return scanStashed(callback, s)
 }
 
 // ScanPreviousVersions scans changes reachable from ref (commit) back to since.
@@ -210,7 +247,7 @@ func (s *GitScanner) ScanIndex(ref string, cb GitScannerFoundPointer) error {
 	if err != nil {
 		return err
 	}
-	return scanIndex(callback, ref, s.Filter, s.cfg.OSEnv())
+	return scanIndex(callback, ref, s.Filter, s.cfg.GitEnv(), s.cfg.OSEnv())
 }
 
 func (s *GitScanner) opts(mode ScanningMode) *ScanRefsOptions {
@@ -247,6 +284,7 @@ type ScanRefsOptions struct {
 	ScanMode         ScanningMode
 	RemoteName       string
 	SkipDeletedBlobs bool
+	CommitsOnly      bool
 	skippedRefs      []string
 	nameMap          map[string]string
 	mutex            *sync.Mutex

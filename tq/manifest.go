@@ -4,21 +4,25 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/fs"
-	"github.com/git-lfs/git-lfs/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/fs"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/ssh"
 	"github.com/rubyist/tracerx"
 )
 
 const (
 	defaultMaxRetries          = 8
+	defaultMaxRetryDelay       = 10
 	defaultConcurrentTransfers = 8
 )
 
 type Manifest struct {
 	// maxRetries is the maximum number of retries a single object can
-	// attempt to make before it will be dropped.
+	// attempt to make before it will be dropped. maxRetryDelay is the maximum
+	// time in seconds to wait between retry attempts when using backoff.
 	maxRetries              int
+	maxRetryDelay           int
 	concurrentTransfers     int
 	basicTransfersOnly      bool
 	standaloneTransferAgent string
@@ -27,7 +31,8 @@ type Manifest struct {
 	uploadAdapterFuncs      map[string]NewAdapterFunc
 	fs                      *fs.Filesystem
 	apiClient               *lfsapi.Client
-	tqClient                *tqClient
+	sshTransfer             *ssh.SSHTransfer
+	batchClientAdapter      BatchClient
 	mu                      sync.Mutex
 }
 
@@ -39,6 +44,10 @@ func (m *Manifest) MaxRetries() int {
 	return m.maxRetries
 }
 
+func (m *Manifest) MaxRetryDelay() int {
+	return m.maxRetryDelay
+}
+
 func (m *Manifest) ConcurrentTransfers() int {
 	return m.concurrentTransfers
 }
@@ -47,11 +56,11 @@ func (m *Manifest) IsStandaloneTransfer() bool {
 	return m.standaloneTransferAgent != ""
 }
 
-func (m *Manifest) batchClient() *tqClient {
+func (m *Manifest) batchClient() BatchClient {
 	if r := m.MaxRetries(); r > 0 {
-		m.tqClient.MaxRetries = r
+		m.batchClientAdapter.SetMaxRetries(r)
 	}
-	return m.tqClient
+	return m.batchClientAdapter
 }
 
 func NewManifest(f *fs.Filesystem, apiClient *lfsapi.Client, operation, remote string) *Manifest {
@@ -64,18 +73,24 @@ func NewManifest(f *fs.Filesystem, apiClient *lfsapi.Client, operation, remote s
 		apiClient = cli
 	}
 
+	sshTransfer := apiClient.SSHTransfer(operation, remote)
+
 	m := &Manifest{
 		fs:                   f,
 		apiClient:            apiClient,
-		tqClient:             &tqClient{Client: apiClient},
+		batchClientAdapter:   &tqClient{Client: apiClient},
 		downloadAdapterFuncs: make(map[string]NewAdapterFunc),
 		uploadAdapterFuncs:   make(map[string]NewAdapterFunc),
+		sshTransfer:          sshTransfer,
 	}
 
 	var tusAllowed bool
 	if git := apiClient.GitEnv(); git != nil {
 		if v := git.Int("lfs.transfer.maxretries", 0); v > 0 {
 			m.maxRetries = v
+		}
+		if v := git.Int("lfs.transfer.maxretrydelay", -1); v > -1 {
+			m.maxRetryDelay = v
 		}
 		if v := git.Int("lfs.concurrenttransfers", 0); v > 0 {
 			m.concurrentTransfers = v
@@ -91,9 +106,20 @@ func NewManifest(f *fs.Filesystem, apiClient *lfsapi.Client, operation, remote s
 	if m.maxRetries < 1 {
 		m.maxRetries = defaultMaxRetries
 	}
+	if m.maxRetryDelay < 1 {
+		m.maxRetryDelay = defaultMaxRetryDelay
+	}
 
 	if m.concurrentTransfers < 1 {
 		m.concurrentTransfers = defaultConcurrentTransfers
+	}
+
+	if sshTransfer != nil {
+		// Multiple concurrent transfers are not yet supported.
+		m.batchClientAdapter = &SSHBatchClient{
+			maxRetries: m.maxRetries,
+			transfer:   sshTransfer,
+		}
 	}
 
 	configureBasicDownloadAdapter(m)
@@ -101,6 +127,7 @@ func NewManifest(f *fs.Filesystem, apiClient *lfsapi.Client, operation, remote s
 	if tusAllowed {
 		configureTusAdapter(m)
 	}
+	configureSSHAdapter(m)
 	return m
 }
 
@@ -117,7 +144,7 @@ func findStandaloneTransfer(client *lfsapi.Client, operation, remote string) str
 		return v
 	}
 
-	ep := client.Endpoints.RemoteEndpoint(operation, remote)
+	ep := client.Endpoints.Endpoint(operation, remote)
 	aep := client.Endpoints.Endpoint(operation, remote)
 	uc := config.NewURLConfig(client.GitEnv())
 	v, ok := uc.Get("lfs", ep.Url, "standalonetransferagent")

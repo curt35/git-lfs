@@ -5,13 +5,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tools/humanize"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tools/humanize"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +58,7 @@ func delayedSmudge(gf *lfs.GitFilter, s *git.FilterProcessScanner, to io.Writer,
 	}
 
 	if !skip && filter.Allows(filename) {
-		if _, statErr := os.Stat(path); statErr != nil {
+		if _, statErr := os.Stat(path); statErr != nil && ptr.Size != 0 {
 			q.Add(filename, path, ptr.Oid, ptr.Size, false, err)
 			return 0, true, ptr, nil
 		}
@@ -150,12 +150,13 @@ func smudge(gf *lfs.GitFilter, to io.Writer, from io.Reader, filename string, sk
 
 func smudgeCommand(cmd *cobra.Command, args []string) {
 	requireStdin("This command should be run by the Git 'smudge' filter")
+	setupRepository()
 	installHooks(false)
 
 	if !smudgeSkip && cfg.Os.Bool("GIT_LFS_SKIP_SMUDGE", false) {
 		smudgeSkip = true
 	}
-	filter := filepathfilter.New(cfg.FetchIncludePaths(), cfg.FetchExcludePaths())
+	filter := filepathfilter.New(cfg.FetchIncludePaths(), cfg.FetchExcludePaths(), filepathfilter.GitAttributes)
 	gitfilter := lfs.NewGitFilter(cfg)
 
 	if n, err := smudge(gitfilter, os.Stdout, os.Stdin, smudgeFilename(args), smudgeSkip, filter); err != nil {
@@ -177,7 +178,7 @@ func smudgeFilename(args []string) string {
 }
 
 func possiblyMalformedObjectSize(n int64) bool {
-	return n > 4*humanize.Gigabyte
+	return n >= 4*humanize.Gibibyte
 }
 
 func init() {

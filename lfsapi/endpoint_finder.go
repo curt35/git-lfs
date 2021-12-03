@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/creds"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/creds"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfshttp"
 	"github.com/rubyist/tracerx"
 )
 
@@ -335,10 +335,11 @@ func initAliases(e *endpointGitFinder, git config.Environment) {
 
 func storeAlias(aliases map[string]string, key string, values []string, suffix string) {
 	for _, value := range values {
-		if _, ok := aliases[value]; ok {
+		url := key[len(aliasPrefix) : len(key)-len(suffix)]
+		if v, ok := aliases[value]; ok && v != url {
 			fmt.Fprintf(os.Stderr, "WARNING: Multiple 'url.*.%s' keys with the same alias: %q\n", suffix, value)
 		}
-		aliases[value] = key[len(aliasPrefix) : len(key)-len(suffix)]
+		aliases[value] = url
 	}
 }
 

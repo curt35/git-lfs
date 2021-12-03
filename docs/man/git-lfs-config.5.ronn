@@ -12,6 +12,11 @@ details. This configuration file is useful for setting options such as the LFS
 URL or access type for all users of a repository, especially when these differ
 from the default. The `.lfsconfig` file uses the same format as `.gitconfig`.
 
+If the `.lfsconfig` file is missing, the index is checked for a version of the
+file, and that is used instead.  If both are missing, `HEAD` is checked for the
+file.  If the repository is bare, only `HEAD` is checked.  This order may change
+for checkouts in the future to better match Git's behavior.
+
 Settings from Git configuration files override the `.lfsconfig` file. This
 allows you to override settings like `lfs.url` in your local environment without
 having to modify the `.lfsconfig` file.
@@ -35,6 +40,20 @@ be scoped inside the configuration for a remote.
   The url used to call the Git LFS remote API when pushing. Default blank (derive
   from either LFS non-push urls or clone url).
 
+* `remote.lfsdefault`
+
+  The remote used to find the Git LFS remote API.  `lfs.url` and
+  `branch.*.remote` for the current branch override this setting.  If this
+  setting is not specified and there is exactly one remote, that remote is
+  picked; otherwise, the default is `origin`.
+
+* `remote.lfspushdefault`
+
+  The remote used to find the Git LFS remote API when pushing.  `lfs.url` and
+  `branch.*.pushremote` for the current branch override this setting.  If this
+  setting is not set, `remote.pushdefault` is used, or if that is not set, the
+  order of selection is used as specified in the `remote.lfsdefault` above.
+
 * `lfs.dialtimeout`
 
   Sets the maximum time, in seconds, that the HTTP client will wait to initiate
@@ -56,6 +75,12 @@ be scoped inside the configuration for a remote.
 
   Sets the maximum time, in seconds, for the HTTP client to maintain keepalive
   connections. Default: 30 minutes.
+
+* `lfs.ssh.automultiplex`
+
+  When using the pure SSH-based protocol, whether to multiplex requests over a
+  single connection when possible.  This option requires the use of OpenSSH or a
+  compatible SSH client.  Default: true.
 
 * `lfs.ssh.retries`
 
@@ -128,7 +153,7 @@ be scoped inside the configuration for a remote.
   using any mechanism you like (rather than just HTTP). `path` should point to
   the process you wish to invoke. The protocol between the git-lfs client and
   the custom transfer process is documented at
-  https://github.com/git-lfs/git-lfs/blob/master/docs/custom-transfers.md
+  https://github.com/git-lfs/git-lfs/blob/main/docs/custom-transfers.md
 
   <name> must be a unique identifier that the LFS server understands. When
   calling the LFS API the client will include a list of supported transfer
@@ -159,6 +184,18 @@ be scoped inside the configuration for a remote.
   transfer as failed. Must be an integer which is at least one. If the value is
   not an integer, is less than one, or is not given, a value of eight will be
   used instead.
+
+* `lfs.transfer.maxretrydelay`
+
+  Specifies the maximum time in seconds LFS will wait between each retry
+  attempt. LFS uses exponential backoff for retries, doubling the time between
+  each retry until reaching this limit. If a server requests a delay using the
+  `Retry-After` header, the header value overrides the exponential delay for
+  that attempt and is not limited by this option.
+
+  Must be an integer which is not negative. Use zero to disable delays between
+  retries unless requested by a server. If the value is not an integer, is
+  negative, or is not given, a value of ten will be used instead.
 
 * `lfs.transfer.maxverifies`
 
@@ -343,6 +380,13 @@ be scoped inside the configuration for a remote.
   `git lfs smudge` and `git lfs filter-process`. If unset, or set to 'false',
   '0', 'off', or similar, Git LFS will smudge files as normal.
 
+* `GIT_LFS_SKIP_PUSH`
+
+  Sets whether or not Git LFS will attempt to upload new Git LFS object in a
+  pre-push hook. If 'true', '1', 'on', or similar, Git LFS will skip the
+  pre-push hook, so no new Git LFS objects will be uploaded. If unset, or set to
+  'false', '0', 'off', or similar, Git LFS will proceed as normal.
+
 * `GIT_LFS_SET_LOCKABLE_READONLY`
   `lfs.setlockablereadonly`
 
@@ -378,12 +422,10 @@ including and limited to:
 - lfs.gitprotocol
 - lfs.locksverify
 - lfs.pushurl
+- lfs.skipdownloaderrors
 - lfs.url
-- lfs.extension.{name}.clean
-- lfs.extension.{name}.smudge
-- lfs.extension.{name}.priority
-- remote.{name}.lfsurl
 - lfs.{*}.access
+- remote.{name}.lfsurl
 
 The set of keys allowed in this file is restricted for security reasons.
 

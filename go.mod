@@ -1,17 +1,16 @@
-module github.com/git-lfs/git-lfs
+// The Git LFS project does not maintain a stable API or ABI for this module.
+// Please do not import this module outside of the Git LFS project.
+module github.com/git-lfs/git-lfs/v3
 
 require (
-	github.com/alexbrainman/sspi v0.0.0-20180125232955-4729b3d4d858
 	github.com/avast/retry-go v2.4.2+incompatible
-	github.com/dpotapov/go-spnego v0.0.0-20190506202455-c2c609116ad0
-	github.com/git-lfs/gitobj v1.4.1
-	github.com/git-lfs/go-netrc v0.0.0-20180525200031-e0e9ca483a18
-	github.com/git-lfs/go-ntlm v0.0.0-20190401175752-c5056e7fa066
-	github.com/git-lfs/wildmatch v1.0.4
+	github.com/dpotapov/go-spnego v0.0.0-20210315154721-298b63a54430
+	github.com/git-lfs/gitobj/v2 v2.0.2
+	github.com/git-lfs/go-netrc v0.0.0-20210914205454-f0c862dd687a
+	github.com/git-lfs/pktline v0.0.0-20210330133718-06e9096e2825
+	github.com/git-lfs/wildmatch/v2 v2.0.1
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
-	github.com/jcmturner/gofork v1.0.0 // indirect
-	github.com/jcmturner/gokrb5 v7.3.0+incompatible // indirect
-	github.com/kr/pty v1.1.8 // indirect
+	github.com/leonelquinteros/gotext v1.5.0
 	github.com/mattn/go-isatty v0.0.4
 	github.com/olekukonko/ts v0.0.0-20171002115256-78ecb04241c0
 	github.com/pkg/errors v0.0.0-20170505043639-c605e284fe17
@@ -19,16 +18,15 @@ require (
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.3 // indirect
 	github.com/ssgelm/cookiejarparser v1.0.1
-	github.com/stretchr/testify v1.2.2
+	github.com/stretchr/testify v1.6.1
 	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xeipuuv/gojsonschema v0.0.0-20170210233622-6b67b3fab74d
-	golang.org/x/net v0.0.0-20191027093000-83d349e8ac1a
-	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4
-	golang.org/x/sys v0.0.0-20190412213103-97732733099d
-	gopkg.in/jcmturner/goidentity.v3 v3.0.0 // indirect
-	gopkg.in/jcmturner/gokrb5.v7 v7.3.0 // indirect
-	gopkg.in/jcmturner/rpc.v1 v1.1.0 // indirect
+	golang.org/x/crypto v0.0.0-20211108221036-ceb1ce70b4fa // indirect
+	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
+	golang.org/x/text v0.3.5 // indirect
 )
 
 go 1.11

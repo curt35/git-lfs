@@ -3,10 +3,10 @@ package commands
 import (
 	"os"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/rubyist/tracerx"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +31,7 @@ var (
 // of commits between the local and remote git servers.
 func pushCommand(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
-		Print("Specify a remote and a remote branch name (`git lfs push origin master`)")
+		Print("Specify a remote and a remote branch name (`git lfs push origin main`)")
 		os.Exit(1)
 	}
 

@@ -4,13 +4,8 @@ DIR="$1"
 
 case $(uname -s) in
   Darwin)
-    brew install curl zlib pcre2 gettext openssl
-    brew reinstall curl zlib pcre2 gettext openssl
-    for i in curl zlib pcre2 gettext openssl
-    do
-      brew unlink $i || true;
-      brew link --force $i || true
-    done;;
+    brew install curl zlib pcre2 openssl
+    brew link --force curl zlib pcre2 openssl;;
   Linux)
     export DEBIAN_FRONTEND=noninteractive
     sed -e 's/^deb/deb-src/' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/src.list
@@ -21,6 +16,7 @@ esac
 
 cd "$DIR"
 printf "%s\n" \
+  "NO_GETTEXT=YesPlease" \
   "NO_OPENSSL=YesPlease" \
   "prefix=/usr/local" \
   > config.mak

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/config"
+	"github.com/git-lfs/git-lfs/v3/config"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -25,6 +25,10 @@ func proxyFromClient(c *Client) func(req *http.Request) (*url.URL, error) {
 
 		if len(proxy) == 0 {
 			return nil, nil
+		}
+
+		if strings.HasPrefix(proxy, "socks5h://") {
+			proxy = strings.Replace(proxy, "socks5h://", "socks5://", 1)
 		}
 
 		cfg := &httpproxy.Config{
@@ -71,7 +75,7 @@ func getProxyServers(u *url.URL, urlCfg *config.URLConfig, osEnv config.Environm
 	if urlCfg != nil {
 		gitProxy, ok := urlCfg.Get("http", u.String(), "proxy")
 		if len(gitProxy) > 0 && ok {
-			if strings.HasPrefix(gitProxy, "https://") {
+			if u.Scheme == "https" {
 				httpsProxy = gitProxy
 			}
 			httpProxy = gitProxy

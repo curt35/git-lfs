@@ -1,8 +1,9 @@
 package lfs
 
 import (
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 const (
@@ -48,11 +49,11 @@ func catFileBatchCheck(revs *StringChannelWrapper, lockableSet *lockableNameSet)
 // of a git object, given its sha1. The contents will be decoded into
 // a Git LFS pointer. revs is a channel over which strings containing Git SHA1s
 // will be sent. It returns a channel from which point.Pointers can be read.
-func catFileBatch(revs *StringChannelWrapper, lockableSet *lockableNameSet, osEnv config.Environment) (*PointerChannelWrapper, chan string, error) {
+func catFileBatch(revs *StringChannelWrapper, lockableSet *lockableNameSet, gitEnv, osEnv config.Environment) (*PointerChannelWrapper, chan string, error) {
 	pointerCh := make(chan *WrappedPointer, chanBufSize)
 	lockableCh := make(chan string, chanBufSize)
 	errCh := make(chan error, 5) // shared by 2 goroutines & may add more detail errors?
-	if err := runCatFileBatch(pointerCh, lockableCh, lockableSet, revs, errCh, osEnv); err != nil {
+	if err := runCatFileBatch(pointerCh, lockableCh, lockableSet, revs, errCh, gitEnv, osEnv); err != nil {
 		return nil, nil, err
 	}
 	return NewPointerChannelWrapper(pointerCh, errCh), lockableCh, nil
@@ -90,11 +91,11 @@ func NewStringChannelWrapper(stringChan <-chan string, errorChan <-chan error) *
 // See NewTreeBlobChannelWrapper for construction / use
 type TreeBlobChannelWrapper struct {
 	*tools.BaseChannelWrapper
-	Results <-chan TreeBlob
+	Results <-chan git.TreeBlob
 }
 
 // Construct a new channel wrapper for TreeBlob
 // Caller can use s.Results directly for normal processing then call Wait() to finish & check for errors
-func NewTreeBlobChannelWrapper(treeBlobChan <-chan TreeBlob, errorChan <-chan error) *TreeBlobChannelWrapper {
+func NewTreeBlobChannelWrapper(treeBlobChan <-chan git.TreeBlob, errorChan <-chan error) *TreeBlobChannelWrapper {
 	return &TreeBlobChannelWrapper{tools.NewBaseChannelWrapper(errorChan), treeBlobChan}
 }

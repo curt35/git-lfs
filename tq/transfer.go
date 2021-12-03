@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 type Direction int
@@ -134,6 +134,8 @@ type Action struct {
 	Header    map[string]string `json:"header,omitempty"`
 	ExpiresAt time.Time         `json:"expires_at,omitempty"`
 	ExpiresIn int               `json:"expires_in,omitempty"`
+	Id        string            `json:"-"`
+	Token     string            `json:"-"`
 
 	createdAt time.Time
 }
@@ -233,10 +235,8 @@ type Adapter interface {
 	// Adapter instances can only be one or the other, although the same
 	// type may be instantiated for each direction
 	Direction() Direction
-	// Begin a new batch of uploads or downloads. Call this first, followed by
-	// one or more Add calls. maxConcurrency controls the number of transfers
-	// that may be done at once. The passed in callback will receive updates on
-	// progress. Either argument may be nil if not required by the client.
+	// Begin a new batch of uploads or downloads. Call this first, followed by one
+	// or more Add calls. The passed in callback will receive updates on progress.
 	Begin(cfg AdapterConfig, cb ProgressCallback) error
 	// Add queues a download/upload, which will complete asynchronously and
 	// notify the callbacks given to Begin()
@@ -245,9 +245,6 @@ type Adapter interface {
 	// once the queued items have completed.
 	// This call blocks until all items have been processed
 	End()
-	// ClearTempStorage clears any temporary files, such as unfinished downloads that
-	// would otherwise be resumed
-	ClearTempStorage() error
 }
 
 // Result of a transfer returned through CompletionChannel()

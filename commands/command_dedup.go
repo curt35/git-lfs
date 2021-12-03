@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -24,13 +24,17 @@ var (
 )
 
 func dedupTestCommand(*cobra.Command, []string) {
-	requireInRepo()
+	setupRepository()
 
 	if supported, err := tools.CheckCloneFileSupported(cfg.TempDir()); err != nil || !supported {
 		if err == nil {
 			err = errors.New("Unknown reason.")
 		}
 		Exit("This system does not support deduplication. %s", err)
+	}
+
+	if len(cfg.Extensions()) > 0 {
+		Exit("This platform supports file de-duplication, however, Git LFS extensions are configured and therefore de-duplication can not be used.")
 	}
 
 	Print("OK: This platform and repository support file de-duplication.")
@@ -42,11 +46,15 @@ func dedupCommand(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	requireInRepo()
+	setupRepository()
 	if gitDir, err := git.GitDir(); err != nil {
 		ExitWithError(err)
 	} else if supported, err := tools.CheckCloneFileSupported(gitDir); err != nil || !supported {
 		Exit("This system does not support deduplication.")
+	}
+
+	if len(cfg.Extensions()) > 0 {
+		Exit("This platform supports file de-duplication, however, Git LFS extensions are configured and therefore de-duplication can not be used.")
 	}
 
 	if dirty, err := git.IsWorkingCopyDirty(); err != nil {
@@ -104,6 +112,10 @@ func dedup(p *lfs.WrappedPointer) (success bool, err error) {
 
 	// Do clone
 	srcFile := cfg.Filesystem().ObjectPathname(p.Oid)
+	if srcFile == os.DevNull {
+		return true, nil
+	}
+
 	dstFile := filepath.Join(cfg.LocalWorkingDir(), p.Name)
 
 	// Clone the file. This overwrites the destination if it exists.

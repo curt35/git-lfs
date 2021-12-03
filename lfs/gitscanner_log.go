@@ -7,11 +7,12 @@ import (
 	"io"
 	"io/ioutil"
 	"regexp"
+	"strings"
 	"time"
 
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/subprocess"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
 	"github.com/rubyist/tracerx"
 )
 
@@ -28,6 +29,9 @@ var (
 	// Arguments to append to a git log call which will limit the output to
 	// lfs changes and format the output suitable for parseLogOutput.. method(s)
 	logLfsSearchArgs = []string{
+		"--no-ext-diff",
+		"--no-textconv",
+		"--color=never",
 		"-G", "oid sha256:", // only diffs which include an lfs file SHA change
 		"-p",                             // include diff so we can read the SHA
 		"-U12",                           // Make sure diff context is always big enough to support 10 extension lines to get whole pointer
@@ -63,6 +67,70 @@ func scanUnpushed(cb GitScannerFoundPointer, remote string) error {
 	return nil
 }
 
+func scanStashed(cb GitScannerFoundPointer, s *GitScanner) error {
+	// Stashes are actually 2-3 commits, each containing one of:
+	// 1. Working copy (WIP) modified files
+	// 2. Index changes
+	// 3. Untracked files (but only if "git stash -u" was used)
+	// The first of these, the WIP commit, is a merge whose first parent
+	// is HEAD and whose other parent(s) are commits 2 and 3 above.
+
+	// We need to get the individual diff of each of these commits to
+	// ensure we have all of the LFS objects referenced by the stash,
+	// so a future "git stash pop" can restore them all.
+
+	// First we get the list of SHAs of the WIP merge commits from the
+	// reflog using "git log -g --format=%h refs/stash --".  Because
+	// older Git versions (at least <=2.7) don't report merge parents in
+	// the reflog, we can't extract the parent SHAs from "Merge:" lines
+	// in the log; we can, however, use the "git log -m" option to force
+	// an individual diff with the first merge parent in a second step.
+	logArgs := []string{"-g", "--format=%h", "refs/stash", "--"}
+
+	cmd, err := git.Log(logArgs...)
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(cmd.Stdout)
+
+	var stashMergeShas []string
+	for scanner.Scan() {
+		stashMergeSha := strings.TrimSpace(scanner.Text())
+		stashMergeShas = append(stashMergeShas, fmt.Sprintf("%v^..%v", stashMergeSha, stashMergeSha))
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Errorf("error while scanning git log for stashed refs: %v", err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		// Ignore this error, it really only happens when there's no refs/stash
+		return nil
+	}
+
+	// We can use the log parser if we provide the -m and --first-parent
+	// options to get the first WIP merge diff shown individually, then
+	// no additional options to get the second index merge diff and
+	// possible third untracked files merge diff in a subsequent step.
+	stashMergeLogArgs := [][]string{{"-m", "--first-parent"}, {}}
+
+	for _, logArgs := range stashMergeLogArgs {
+		// Add standard search args to find lfs references
+		logArgs = append(logArgs, logLfsSearchArgs...)
+
+		logArgs = append(logArgs, stashMergeShas...)
+
+		cmd, err = git.Log(logArgs...)
+		if err != nil {
+			return err
+		}
+
+		parseScannerLogOutput(cb, LogDiffAdditions, cmd)
+	}
+
+	return nil
+}
+
 func parseScannerLogOutput(cb GitScannerFoundPointer, direction LogDiffDirection, cmd *subprocess.BufferedCmd) {
 	ch := make(chan gitscannerResult, chanBufSize)
 
@@ -72,6 +140,10 @@ func parseScannerLogOutput(cb GitScannerFoundPointer, direction LogDiffDirection
 			if p := scanner.Pointer(); p != nil {
 				ch <- gitscannerResult{Pointer: p}
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			ioutil.ReadAll(cmd.Stdout)
+			ch <- gitscannerResult{Err: fmt.Errorf("error while scanning git log: %v", err)}
 		}
 		stderr, _ := ioutil.ReadAll(cmd.Stderr)
 		err := cmd.Wait()
@@ -111,7 +183,7 @@ func parseLogOutputToPointers(log io.Reader, dir LogDiffDirection,
 	includePaths, excludePaths []string, results chan *WrappedPointer) {
 	scanner := newLogScanner(dir, log)
 	if len(includePaths)+len(excludePaths) > 0 {
-		scanner.Filter = filepathfilter.New(includePaths, excludePaths)
+		scanner.Filter = filepathfilter.New(includePaths, excludePaths, filepathfilter.GitAttributes)
 	}
 	for scanner.Scan() {
 		if p := scanner.Pointer(); p != nil {
@@ -127,7 +199,8 @@ type logScanner struct {
 	// the exclude patterns are skipped.
 	Filter *filepathfilter.Filter
 
-	s       *bufio.Scanner
+	r       *bufio.Reader
+	err     error
 	dir     LogDiffDirection
 	pointer *WrappedPointer
 
@@ -145,16 +218,16 @@ type logScanner struct {
 // r: a stream of output from git log with at least logLfsSearchArgs specified
 func newLogScanner(dir LogDiffDirection, r io.Reader) *logScanner {
 	return &logScanner{
-		s:                   bufio.NewScanner(r),
+		r:                   bufio.NewReader(r),
 		dir:                 dir,
 		pointerData:         &bytes.Buffer{},
 		currentFileIncluded: true,
 
 		// no need to compile these regexes on every `git-lfs` call, just ones that
 		// use the scanner.
-		commitHeaderRegex:    regexp.MustCompile(`^lfs-commit-sha: ([A-Fa-f0-9]{40})(?: ([A-Fa-f0-9]{40}))*`),
-		fileHeaderRegex:      regexp.MustCompile(`diff --git a\/(.+?)\s+b\/(.+)`),
-		fileMergeHeaderRegex: regexp.MustCompile(`diff --cc (.+)`),
+		commitHeaderRegex:    regexp.MustCompile(fmt.Sprintf(`^lfs-commit-sha: (%s)(?: (%s))*`, git.ObjectIDRegex, git.ObjectIDRegex)),
+		fileHeaderRegex:      regexp.MustCompile(`^diff --git a\/(.+?)\s+b\/(.+)`),
+		fileMergeHeaderRegex: regexp.MustCompile(`^diff --cc (.+)`),
 		pointerDataRegex:     regexp.MustCompile(`^([\+\- ])(version https://git-lfs|oid sha256|size|ext-).*$`),
 	}
 }
@@ -164,7 +237,7 @@ func (s *logScanner) Pointer() *WrappedPointer {
 }
 
 func (s *logScanner) Err() error {
-	return s.s.Err()
+	return s.err
 }
 
 func (s *logScanner) Scan() bool {
@@ -208,8 +281,16 @@ func (s *logScanner) finishLastPointer() *WrappedPointer {
 // There can be multiple diffs per commit (multiple binaries)
 // Also when a binary is changed the diff will include a '-' line for the old SHA
 func (s *logScanner) scan() (*WrappedPointer, bool) {
-	for s.s.Scan() {
-		line := s.s.Text()
+	for {
+		line, err := s.r.ReadString('\n')
+
+		if err != nil && err != io.EOF {
+			s.err = err
+			return nil, false
+		}
+
+		// remove trailing newline delimiter and optional single carriage return
+		line = strings.TrimSuffix(strings.TrimRight(line, "\n"), "\r")
 
 		if match := s.commitHeaderRegex.FindStringSubmatch(line); match != nil {
 			// Currently we're not pulling out commit groupings, but could if we wanted
@@ -255,6 +336,10 @@ func (s *logScanner) scan() (*WrappedPointer, bool) {
 					s.pointerData.WriteString("\n") // newline was stripped off by scanner
 				}
 			}
+		}
+
+		if err == io.EOF {
+			break
 		}
 	}
 

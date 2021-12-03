@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/rubyist/tracerx"
 	"github.com/spf13/cobra"
 )
 
 func pullCommand(cmd *cobra.Command, args []string) {
 	requireGitVersion()
-	requireInRepo()
+	setupRepository()
 
 	if len(args) > 0 {
 		// Remote is first arg
@@ -27,7 +27,7 @@ func pullCommand(cmd *cobra.Command, args []string) {
 	}
 
 	includeArg, excludeArg := getIncludeExcludeArgs(cmd)
-	filter := buildFilepathFilter(cfg, includeArg, excludeArg)
+	filter := buildFilepathFilter(cfg, includeArg, excludeArg, true)
 	pull(filter)
 }
 

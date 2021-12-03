@@ -15,7 +15,7 @@ begin_test "migrate import --no-rewrite (default branch)"
   git lfs migrate import --no-rewrite --yes *.txt
 
   # Ensure our desired files were imported into git-lfs
-  assert_pointer "refs/heads/master" "a.txt" "$txt_oid" "120"
+  assert_pointer "refs/heads/main" "a.txt" "$txt_oid" "120"
   assert_local_object "$txt_oid" "120"
 
   # Ensure the git history remained the same
@@ -52,8 +52,8 @@ begin_test "migrate import --no-rewrite (bare repository)"
   git lfs migrate import --no-rewrite --yes a.txt a.md
 
   # Ensure our desired files were imported
-  assert_pointer "refs/heads/master" "a.txt" "$txt_oid" "30"
-  assert_pointer "refs/heads/master" "a.md" "$md_oid" "50"
+  assert_pointer "refs/heads/main" "a.txt" "$txt_oid" "30"
+  assert_pointer "refs/heads/main" "a.md" "$md_oid" "50"
 
   # Ensure the git history remained the same
   new_commit_oid="$(git rev-parse HEAD~1)"
@@ -84,8 +84,8 @@ begin_test "migrate import --no-rewrite (multiple branches)"
   git lfs migrate import --no-rewrite --yes *.txt *.md
 
   # Ensure our desired files were imported
-  assert_pointer "refs/heads/master" "a.md" "$md_oid" "140"
-  assert_pointer "refs/heads/master" "a.txt" "$txt_oid" "120"
+  assert_pointer "refs/heads/main" "a.md" "$md_oid" "140"
+  assert_pointer "refs/heads/main" "a.txt" "$txt_oid" "120"
 
   assert_local_object "$md_oid" "140"
   assert_local_object "$txt_oid" "120"
@@ -131,11 +131,11 @@ begin_test "migrate import --no-rewrite (nested .gitattributes)"
   setup_local_branch_with_nested_gitattrs
 
   # Ensure a .md filter does not exist in the top-level .gitattributes
-  master_attrs="$(git cat-file -p "$master:.gitattributes")"
-  [ !"$(echo "$master_attrs" | grep -q ".md")" ]
+  main_attrs="$(git cat-file -p "$main:.gitattributes")"
+  [ !"$(echo "$main_attrs" | grep -q ".md")" ]
 
   # Ensure a .md filter exists in the nested .gitattributes
-  nested_attrs="$(git cat-file -p "$master:b/.gitattributes")"
+  nested_attrs="$(git cat-file -p "$main:b/.gitattributes")"
   echo "$nested_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
 
   md_oid="$(calc_oid "$(git cat-file -p :a.md)")"
@@ -146,8 +146,8 @@ begin_test "migrate import --no-rewrite (nested .gitattributes)"
 
   # Ensure a.txt and subtree/a.md were imported, even though *.md only exists in the
   # nested subtree/.gitattributes file
-  assert_pointer "refs/heads/master" "b/a.md" "$nested_md_oid" "140"
-  assert_pointer "refs/heads/master" "a.txt" "$txt_oid" "120"
+  assert_pointer "refs/heads/main" "b/a.md" "$nested_md_oid" "140"
+  assert_pointer "refs/heads/main" "a.txt" "$txt_oid" "120"
 
   assert_local_object "$nested_md_oid" 140
   assert_local_object "$txt_oid" 120
@@ -223,5 +223,43 @@ begin_test "migrate import --no-rewrite (with empty commit message)"
   if [ "$commit_msg" != "" ]; then
     exit 1
   fi
+)
+end_test
+
+begin_test "migrate import --no-rewrite (strict .gitattributes)"
+(
+  set -e
+
+  reponame="$(basename "$0" ".sh")-strict-match"
+  clone_repo "$reponame" repo-strict-match
+
+  mkdir -p major-oak/mainst/.yarn-offline-mirror/
+  mkdir -p major-oak/major-oak/frontend/.yarn-offline-mirror/
+  foo_contents="foo"
+  foo_oid=$(calc_oid "$foo_contents")
+  bar_contents="bar"
+  bar_oid=$(calc_oid "$bar_contents")
+  printf "$foo_contents" > major-oak/mainst/.yarn-offline-mirror/typescript-3.4.3.tgz
+  printf "$bar_contents" > major-oak/major-oak/frontend/.yarn-offline-mirror/typescript-2.9.2.tgz
+  git add .
+  git commit -m 'Initial import'
+
+  cat >.gitattributes <<EOF
+major-oak/mainst/.yarn-offline-mirror/typescript-3.4.3.tgz filter=lfs diff=lfs merge=lfs -text
+major-oak/major-oak/frontend/.yarn-offline-mirror/typescript-2.9.2.tgz filter=lfs diff=lfs merge=lfs -text
+EOF
+
+  git add .
+  git commit -m '.gitattributes'
+
+  git lfs migrate import --yes --no-rewrite \
+    major-oak/mainst/.yarn-offline-mirror/typescript-3.4.3.tgz \
+    major-oak/major-oak/frontend/.yarn-offline-mirror/typescript-2.9.2.tgz
+
+  assert_pointer "refs/heads/main" "major-oak/mainst/.yarn-offline-mirror/typescript-3.4.3.tgz" "$foo_oid" "3"
+  assert_pointer "refs/heads/main" "major-oak/major-oak/frontend/.yarn-offline-mirror/typescript-2.9.2.tgz" "$bar_oid" "3"
+
+  assert_local_object "$foo_oid" "3"
+  assert_local_object "$bar_oid" "3"
 )
 end_test

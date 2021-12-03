@@ -5,14 +5,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/git/githistory"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/gitobj"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/git/githistory"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/gitobj/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +43,7 @@ func migrateExportCommand(cmd *cobra.Command, args []string) {
 	opts := &githistory.RewriteOptions{
 		Verbose:           migrateVerbose,
 		ObjectMapFilePath: objectMapFilePath,
-		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
+		BlobFn: func(path string, oid []byte, b *gitobj.Blob) (*gitobj.Blob, error) {
 			if filepath.Base(path) == ".gitattributes" {
 				return b, nil
 			}
@@ -102,7 +102,7 @@ func migrateExportCommand(cmd *cobra.Command, args []string) {
 		UpdateRefs: true,
 	}
 
-	requireInRepo()
+	setupRepository()
 
 	opts, err = rewriteOptions(args, opts, l)
 	if err != nil {

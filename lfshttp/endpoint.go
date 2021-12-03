@@ -3,20 +3,20 @@ package lfshttp
 import (
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/ssh"
 )
 
 const UrlUnknown = "<unknown>"
 
 // An Endpoint describes how to access a Git LFS server.
 type Endpoint struct {
-	Url            string
-	SshUserAndHost string
-	SshPath        string
-	SshPort        string
-	Operation      string
+	Url         string
+	SSHMetadata ssh.SSHMetadata
+	Operation   string
 }
 
 func endpointOperation(e Endpoint, method string) string {
@@ -45,23 +45,16 @@ func EndpointFromSshUrl(u *url.URL) Endpoint {
 
 	host := match[1]
 	if u.User != nil && u.User.Username() != "" {
-		endpoint.SshUserAndHost = fmt.Sprintf("%s@%s", u.User.Username(), host)
+		endpoint.SSHMetadata.UserAndHost = fmt.Sprintf("%s@%s", u.User.Username(), host)
 	} else {
-		endpoint.SshUserAndHost = host
+		endpoint.SSHMetadata.UserAndHost = host
 	}
 
 	if len(match) > 2 {
-		endpoint.SshPort = match[2]
+		endpoint.SSHMetadata.Port = match[2]
 	}
 
-	// u.Path includes a preceding '/', strip off manually
-	// rooted paths in the URL will be '//path/to/blah'
-	// this is just how Go's URL parsing works
-	if strings.HasPrefix(u.Path, "/") {
-		endpoint.SshPath = u.Path[1:]
-	} else {
-		endpoint.SshPath = u.Path
-	}
+	endpoint.SSHMetadata.Path = u.Path
 
 	// Fallback URL for using HTTPS while still using SSH for git
 	// u.Host includes host & port so can't use SSH port
@@ -98,7 +91,11 @@ func EndpointFromBareSshUrl(rawurl string) Endpoint {
 		return Endpoint{Url: UrlUnknown}
 	}
 
-	return EndpointFromSshUrl(newu)
+	endpoint := EndpointFromSshUrl(newu)
+	if strings.HasPrefix(endpoint.SSHMetadata.Path, "/") {
+		endpoint.SSHMetadata.Path = endpoint.SSHMetadata.Path[1:]
+	}
+	return endpoint
 }
 
 // Construct a new endpoint from a HTTP URL
@@ -108,18 +105,7 @@ func EndpointFromHttpUrl(u *url.URL) Endpoint {
 }
 
 func EndpointFromLocalPath(path string) Endpoint {
-	if !strings.HasSuffix(path, ".git") {
-		path = fmt.Sprintf("%s/.git", path)
-	}
-	var slash string
-	if abs, err := filepath.Abs(path); err == nil {
-		// Required for Windows paths to work.
-		if !strings.HasPrefix(abs, "/") {
-			slash = "/"
-		}
-		path = abs
-	}
-	return Endpoint{Url: fmt.Sprintf("file://%s%s", slash, filepath.ToSlash(path))}
+	return Endpoint{Url: git.RewriteLocalPathAsURL(path)}
 }
 
 // Construct a new endpoint from a file URL

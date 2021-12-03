@@ -9,15 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/git/gitattr"
-	"github.com/git-lfs/git-lfs/git/githistory"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/gitobj"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/git/gitattr"
+	"github.com/git-lfs/git-lfs/v3/git/githistory"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tools/humanize"
+	"github.com/git-lfs/gitobj/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -133,12 +134,21 @@ func migrateImportCommand(cmd *cobra.Command, args []string) {
 	gitfilter := lfs.NewGitFilter(cfg)
 
 	var fixups *gitattr.Tree
+	above, err := humanize.ParseBytes(migrateImportAboveFmt)
+	if err != nil {
+		ExitWithError(errors.Wrap(err, "fatal: cannot parse --above=<n>"))
+	}
+
+	blobCache := make(map[string]bytes.Buffer)
 
 	migrate(args, rewriter, l, &githistory.RewriteOptions{
 		Verbose:           migrateVerbose,
 		ObjectMapFilePath: objectMapFilePath,
-		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
+		BlobFn: func(path string, origOid []byte, b *gitobj.Blob) (*gitobj.Blob, error) {
 			if filepath.Base(path) == ".gitattributes" {
+				return b, nil
+			}
+			if (above > 0) && (uint64(b.Size) < above) {
 				return b, nil
 			}
 
@@ -158,12 +168,18 @@ func migrateImportCommand(cmd *cobra.Command, args []string) {
 
 			var buf bytes.Buffer
 
-			if _, err := clean(gitfilter, &buf, b.Contents, path, b.Size); err != nil {
-				return nil, err
+			buf, cached := blobCache[hex.EncodeToString(origOid)]
+			if !cached {
+				if _, err := clean(gitfilter, &buf, b.Contents, path, b.Size); err != nil {
+					return nil, err
+				}
+				blobCache[hex.EncodeToString(origOid)] = buf
 			}
 
-			if ext := filepath.Ext(path); len(ext) > 0 {
+			if ext := filepath.Ext(path); len(ext) > 0 && above == 0 {
 				exts.Add(fmt.Sprintf("*%s filter=lfs diff=lfs merge=lfs -text", ext))
+			} else {
+				exts.Add(fmt.Sprintf("/%s filter=lfs diff=lfs merge=lfs -text", escapeGlobCharacters(path)))
 			}
 
 			return &gitobj.Blob{
@@ -283,7 +299,7 @@ func trackedFromFilter(filter *filepathfilter.Filter) *tools.OrderedSet {
 	}
 
 	for _, exclude := range filter.Exclude() {
-		tracked.Add(fmt.Sprintf("%s text -filter -merge -diff", escapeAttrPattern(exclude)))
+		tracked.Add(fmt.Sprintf("%s !text -filter -merge -diff", escapeAttrPattern(exclude)))
 	}
 
 	return tracked

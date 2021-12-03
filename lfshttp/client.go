@@ -17,10 +17,10 @@ import (
 	"time"
 
 	spnego "github.com/dpotapov/go-spnego"
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/creds"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/creds"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/rubyist/tracerx"
 	"golang.org/x/net/http2"
 )
@@ -219,7 +219,7 @@ func (c *Client) sshResolveWithRetries(e Endpoint, method string) (*sshAuthRespo
 
 		tracerx.Printf(
 			"ssh: %s failed, error: %s, message: %s (try: %d/%d)",
-			e.SshUserAndHost, err.Error(), sshRes.Message, i,
+			e.SSHMetadata.UserAndHost, err.Error(), sshRes.Message, i,
 			requests,
 		)
 	}
@@ -309,6 +309,10 @@ func (c *Client) DoWithRedirect(cli *http.Client, req *http.Request, remote stri
 
 	if res == nil {
 		return nil, nil, nil
+	}
+
+	if res.Uncompressed {
+		tracerx.Printf("http: decompressed gzipped response")
 	}
 
 	c.traceResponse(req, tracedReq, res)
@@ -449,7 +453,9 @@ func (c *Client) Transport(u *url.URL, access creds.AccessMode) (http.RoundTripp
 		tr.DialContext = dialer.DialContext
 	}
 
-	tr.TLSClientConfig = &tls.Config{}
+	tr.TLSClientConfig = &tls.Config{
+		Renegotiation: tls.RenegotiateFreelyAsClient,
+	}
 
 	if isClientCertEnabledForHost(c, host) {
 		tracerx.Printf("http: client cert for %s", host)

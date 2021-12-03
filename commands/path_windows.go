@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package commands
@@ -8,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/subprocess"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
 )
 
 var (

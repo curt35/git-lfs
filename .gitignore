@@ -9,6 +9,7 @@ man/*
 *.test
 tmp
 t/remote
+t/scutiger
 t/test_count
 t/test_count.lock
 
@@ -31,6 +32,11 @@ docker/*.key
 
 src
 commands/mancontent_gen.go
+
+po/build
+*.mo
+*.pot
+tr/tr_gen.go
 
 lfstest-*
 !lfstest-*.go

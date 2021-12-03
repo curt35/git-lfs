@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/git-lfs/gitobj"
-	"github.com/git-lfs/wildmatch"
+	"github.com/git-lfs/gitobj/v2"
+	"github.com/git-lfs/wildmatch/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

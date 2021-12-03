@@ -4,9 +4,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tools/humanize"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tools/humanize"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +20,7 @@ var (
 )
 
 func lsFilesCommand(cmd *cobra.Command, args []string) {
-	requireInRepo()
+	setupRepository()
 
 	var ref string
 	var otherRef string
@@ -49,7 +49,7 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 	} else {
 		fullref, err := git.CurrentRef()
 		if err != nil {
-			ref = git.RefBeforeFirstCommit
+			ref = git.EmptyTree()
 		} else {
 			ref = fullref.Sha
 		}
@@ -65,6 +65,10 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 	gitscanner := lfs.NewGitScanner(cfg, func(p *lfs.WrappedPointer, err error) {
 		if err != nil {
 			Exit("Could not scan for Git LFS tree: %s", err)
+			return
+		}
+
+		if p.Size == 0 {
 			return
 		}
 
@@ -107,7 +111,7 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 	defer gitscanner.Close()
 
 	includeArg, excludeArg := getIncludeExcludeArgs(cmd)
-	gitscanner.Filter = buildFilepathFilter(cfg, includeArg, excludeArg)
+	gitscanner.Filter = buildFilepathFilter(cfg, includeArg, excludeArg, false)
 
 	if len(args) == 0 {
 		// Only scan the index when "git lfs ls-files" was invoked with

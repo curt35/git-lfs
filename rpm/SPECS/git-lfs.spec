@@ -1,5 +1,5 @@
 Name:           git-lfs
-Version:        2.10.0
+Version:        3.0.0
 Release:        1%{?dist}
 Summary:        Git extension for versioning large files
 
@@ -50,10 +50,14 @@ install -D man/*.1 ${RPM_BUILD_ROOT}/usr/share/man/man1
 install -D man/*.5 ${RPM_BUILD_ROOT}/usr/share/man/man5
 
 %post
-git lfs install --system
+# The --skip-repo option prevents failure if / is a Git repository with existing
+# non-git-lfs hooks.
+git lfs install --skip-repo --system
 
 %preun
-git lfs uninstall
+# The --skip-repo option avoids mutating / if it is a Git repository. (Maybe the
+# user wants to replace this package with a different installation.)
+git lfs uninstall --skip-repo --system
 
 %check
 export GIT_LFS_TEST_DIR=$(mktemp -d)
@@ -65,7 +69,6 @@ export SKIPAPITESTCOMPILE=1
 
 pushd src/github.com/git-lfs/%{name}
   make test
-  go get github.com/git-lfs/go-ntlm/ntlm
   make -C t PROVE_EXTRA_ARGS=-j4 test
 popd
 

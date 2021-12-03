@@ -1,17 +1,18 @@
 package tq
 
 import (
+	"fmt"
 	"time"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/lfshttp"
 	"github.com/rubyist/tracerx"
 )
 
 type tqClient struct {
-	MaxRetries int
+	maxRetries int
 	*lfsapi.Client
 }
 
@@ -24,11 +25,13 @@ type batchRequest struct {
 	Objects              []*Transfer `json:"objects"`
 	TransferAdapterNames []string    `json:"transfers,omitempty"`
 	Ref                  *batchRef   `json:"ref"`
+	HashAlgorithm        string      `json:"hash_algo"`
 }
 
 type BatchResponse struct {
 	Objects             []*Transfer `json:"objects"`
 	TransferAdapterName string      `json:"transfer"`
+	HashAlgorithm       string      `json:"hash_algo"`
 	endpoint            lfshttp.Endpoint
 }
 
@@ -42,7 +45,22 @@ func Batch(m *Manifest, dir Direction, remote string, remoteRef *git.Ref, object
 		Objects:              objects,
 		TransferAdapterNames: m.GetAdapterNames(dir),
 		Ref:                  &batchRef{Name: remoteRef.Refspec()},
+		HashAlgorithm:        "sha256",
 	})
+}
+
+type BatchClient interface {
+	Batch(remote string, bReq *batchRequest) (*BatchResponse, error)
+	MaxRetries() int
+	SetMaxRetries(n int)
+}
+
+func (c *tqClient) MaxRetries() int {
+	return c.maxRetries
+}
+
+func (c *tqClient) SetMaxRetries(n int) {
+	c.maxRetries = n
 }
 
 func (c *tqClient) Batch(remote string, bReq *batchRequest) (*BatchResponse, error) {
@@ -71,7 +89,7 @@ func (c *tqClient) Batch(remote string, bReq *batchRequest) (*BatchResponse, err
 	tracerx.Printf("api: batch %d files", len(bReq.Objects))
 
 	req = c.Client.LogRequest(req, "lfs.batch")
-	res, err := c.DoAPIRequestWithAuth(remote, lfshttp.WithRetries(req, c.MaxRetries))
+	res, err := c.DoAPIRequestWithAuth(remote, lfshttp.WithRetries(req, c.MaxRetries()))
 	if err != nil {
 		tracerx.Printf("api error: %s", err)
 		return nil, errors.Wrap(err, "batch response")
@@ -79,6 +97,10 @@ func (c *tqClient) Batch(remote string, bReq *batchRequest) (*BatchResponse, err
 
 	if err := lfshttp.DecodeJSON(res, bRes); err != nil {
 		return bRes, errors.Wrap(err, "batch response")
+	}
+
+	if bRes.HashAlgorithm != "" && bRes.HashAlgorithm != "sha256" {
+		return bRes, errors.Wrap(fmt.Errorf("unsupported hash algorithm"), "batch response")
 	}
 
 	if res.StatusCode != 200 {

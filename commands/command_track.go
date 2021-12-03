@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/git/gitattr"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/git/gitattr"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -32,16 +32,7 @@ var (
 
 func trackCommand(cmd *cobra.Command, args []string) {
 	requireGitVersion()
-
-	if cfg.LocalGitDir() == "" {
-		Print("Not a git repository.")
-		os.Exit(128)
-	}
-
-	if cfg.LocalWorkingDir() == "" {
-		Print("This operation must be run in a work tree.")
-		os.Exit(128)
-	}
+	setupWorkingCopy()
 
 	if !cfg.Os.Bool("GIT_LFS_TRACK_NO_INSTALL_HOOKS", false) {
 		installHooks(false)

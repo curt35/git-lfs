@@ -6,14 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/git"
+	"github.com/git-lfs/git-lfs/v3/git"
 	"github.com/rubyist/tracerx"
 	"github.com/spf13/cobra"
 )
 
 var (
-	prePushDryRun       = false
-	prePushDeleteBranch = strings.Repeat("0", 40)
+	prePushDryRun = false
 )
 
 // prePushCommand is run through Git's pre-push hook. The pre-push hook passes
@@ -44,10 +43,15 @@ func prePushCommand(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	if cfg.Os.Bool("GIT_LFS_SKIP_PUSH", false) {
+		return
+	}
+
 	requireGitVersion()
 
 	// Remote is first arg
-	if err := cfg.SetValidPushRemote(args[0]); err != nil {
+	remote, _ := git.MapRemoteURL(args[0], true)
+	if err := cfg.SetValidPushRemote(remote); err != nil {
 		Exit("Invalid remote name %q: %s", args[0], err)
 	}
 
@@ -79,7 +83,7 @@ func prePushRefs(r io.Reader) []*git.RefUpdate {
 		tracerx.Printf("pre-push: %s", line)
 
 		left, right := decodeRefs(line)
-		if left.Sha == prePushDeleteBranch {
+		if git.IsZeroObjectID(left.Sha) {
 			continue
 		}
 

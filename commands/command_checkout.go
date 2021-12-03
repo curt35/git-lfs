@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +20,7 @@ var (
 )
 
 func checkoutCommand(cmd *cobra.Command, args []string) {
-	requireInRepo()
+	setupRepository()
 
 	stage, err := whichCheckout()
 	if err != nil {
@@ -66,7 +66,7 @@ func checkoutCommand(cmd *cobra.Command, args []string) {
 		pointers = append(pointers, p)
 	})
 
-	chgitscanner.Filter = filepathfilter.New(rootedPaths(args), nil)
+	chgitscanner.Filter = filepathfilter.New(rootedPaths(args), nil, filepathfilter.GitIgnore)
 
 	if err := chgitscanner.ScanTree(ref.Sha); err != nil {
 		ExitWithError(err)
@@ -99,7 +99,7 @@ func checkoutConflict(file string, stage git.IndexStage) {
 		Exit("Could not checkout (are you not in the middle of a merge?): %v", err)
 	}
 
-	scanner, err := git.NewObjectScanner(cfg.OSEnv())
+	scanner, err := git.NewObjectScanner(cfg.GitEnv(), cfg.OSEnv())
 	if err != nil {
 		Exit("Could not create object scanner: %v", err)
 	}
@@ -145,10 +145,10 @@ func whichCheckout() (stage git.IndexStage, err error) {
 }
 
 // Parameters are filters
-// firstly convert any pathspecs to the root of the repo, in case this is being
-// executed in a sub-folder
+// firstly convert any pathspecs to patterns relative to the root of the repo,
+// in case this is being executed in a sub-folder
 func rootedPaths(args []string) []string {
-	pathConverter, err := lfs.NewCurrentToRepoPathConverter(cfg)
+	pathConverter, err := lfs.NewCurrentToRepoPatternConverter(cfg)
 	if err != nil {
 		Panic(err, "Could not checkout")
 	}

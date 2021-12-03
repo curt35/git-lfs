@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 const (
@@ -25,13 +25,8 @@ type basicUploadAdapter struct {
 	*adapterBase
 }
 
-func (a *basicUploadAdapter) ClearTempStorage() error {
-	// Should be empty already but also remove dir
-	return os.RemoveAll(a.tempDir())
-}
-
 func (a *basicUploadAdapter) tempDir() string {
-	// Must be dedicated to this adapter as deleted by ClearTempStorage
+	// Dedicated to this adapter rather than shared with basic download.
 	d := filepath.Join(os.TempDir(), "git-lfs-basic-temp")
 	if err := tools.MkdirAll(d, a.fs); err != nil {
 		return os.TempDir()
@@ -86,7 +81,7 @@ func (a *basicUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb Progres
 		return nil
 	}
 
-	cbr := tools.NewBodyWithCallback(f, t.Size, ccb)
+	cbr := tools.NewFileBodyWithCallback(f, t.Size, ccb)
 	var reader lfsapi.ReadSeekCloser = cbr
 
 	// Signal auth was ok on first read; this frees up other workers to start

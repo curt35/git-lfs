@@ -30,7 +30,7 @@ mkdir -p ${PACKAGE_DIR}/centos || :
 mkdir -p ${PACKAGE_DIR}/debian || :
 
 #If you are not in docker group and you have sudo, default value is sudo
-: ${SUDO=`if ( [ ! -w /var/run/docker.sock ] && id -nG | grep -qwv docker && [ "${DOCKER_HOST:+dh}" != "dh" ] ) && which sudo > /dev/null 2>&1; then echo sudo; fi`}
+: ${SUDO=`if ( [ ! -w /var/run/docker.sock ] && id -nG | grep -qwv docker && [ "${DOCKER_HOST:+dh}" != "dh" ] ) && command -v sudo > /dev/null 2>&1; then echo sudo; fi`}
 
 function split_image_name()
 { #$1 - image dockerfile
@@ -42,8 +42,14 @@ function split_image_name()
 
 # Parse Arguments
 IMAGES=()
-while [[ $# > 0 ]]; do
-  if [ "$1" == "--" ]; then
+PRUNE=
+ARCH=amd64
+while [[ $# -gt 0 ]]; do
+  if [ "$1" = "--prune" ]; then
+    PRUNE=t
+  elif [[ "$1" == --arch=* ]]; then
+    ARCH="${1#--arch=}"
+  elif [ "$1" == "--" ]; then
     shift
     DOCKER_CMD="${@}"
     break
@@ -55,7 +61,7 @@ done
 
 if [[ ${#IMAGES[@]} == 0 ]]; then
   # If you change this list, change script/upload as well.
-  IMAGES=(centos_6 centos_7 centos_8 debian_8 debian_9 debian_10)
+  IMAGES=(centos_7 centos_8 debian_9 debian_10 debian_11)
 fi
 
 mkdir -p "${PACKAGE_DIR}"
@@ -106,8 +112,13 @@ for IMAGE_NAME in "${IMAGES[@]}"; do
                    -e FINAL_GID=${FINAL_GID} \
                    -v "${MINGW_PATCH}${REPO_DIR}:/src" \
                    -v "${MINGW_PATCH}${IMAGE_REPO_DIR}:/repo" \
+                   --platform "$ARCH" \
                    gitlfs/build-dockers:${IMAGE_NAME} ${DOCKER_CMD-}
 
+  if [ -n "$PRUNE" ]
+  then
+    $SUDO docker rmi -f "gitlfs/build-dockers:${IMAGE_NAME}"
+  fi
 done
 
 echo "Docker run completed successfully!"

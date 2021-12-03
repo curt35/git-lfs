@@ -3,7 +3,7 @@
 # assert_pointer confirms that the pointer in the repository for $path in the
 # given $ref matches the given $oid and $size.
 #
-#   $ assert_pointer "master" "path/to/file" "some-oid" 123
+#   $ assert_pointer "main" "path/to/file" "some-oid" 123
 assert_pointer() {
   local ref="$1"
   local path="$2"
@@ -27,7 +27,7 @@ assert_pointer() {
 # refute_pointer confirms that the file in the repository for $path in the
 # given $ref is _not_ a pointer.
 #
-#   $ refute_pointer "master" "path/to/file"
+#   $ refute_pointer "main" "path/to/file"
 refute_pointer() {
   local ref="$1"
   local path="$2"
@@ -170,6 +170,24 @@ assert_server_object() {
   }
 }
 
+check_server_lock_ssh() {
+  local reponame="$1"
+  local id="$2"
+  local refspec="$3"
+  local destination="$(canonical_path "$REMOTEDIR/$reponame.git")"
+
+  (
+    pktize_text 'version 1'
+    pktize_flush
+    pktize_text 'list-lock'
+    pktize_text "id=$id"
+    pktize_text "refname=$refname"
+    pktize_flush
+    pktize_text 'quit'
+    pktize_flush
+  ) | lfs-ssh-echo git@127.0.0.1 "git-lfs-transfer '$destination' download" 2>&1
+}
+
 # This asserts the lock path and returns the lock ID by parsing the response of
 #
 #   git lfs lock --json <path>
@@ -206,6 +224,22 @@ assert_server_lock() {
   }
 }
 
+# assert that a lock with the given ID exists on the test server
+assert_server_lock_ssh() {
+  local reponame="$1"
+  local id="$2"
+  local refspec="$3"
+
+  check_server_lock_ssh "$reponame" "$id" "$refspec" |
+    tee output.log
+
+  grep "status 200" output.log
+  grep "$id" output.log || {
+    cat output.log
+    exit 1
+  }
+}
+
 # refute that a lock with the given ID exists on the test server
 refute_server_lock() {
   local reponame="$1"
@@ -220,6 +254,24 @@ refute_server_lock() {
   grep "200 OK" http.log
 
   [ $(grep -c "$id" http.json) -eq 0 ]
+}
+
+# refute that a lock with the given ID exists on the test server
+refute_server_lock_ssh() {
+  local reponame="$1"
+  local id="$2"
+  local refspec="$3"
+  local destination="$(canonical_path "$REMOTEDIR/$reponame.git")"
+
+  check_server_lock_ssh "$reponame" "$id" "$refspec" |
+    tee output.log
+
+  grep "status 200" output.log
+  if grep "$id" output.log
+  then
+    cat output.log
+    exit 1
+  fi
 }
 
 # Assert that .gitattributes contains a given attribute N times
@@ -451,13 +503,13 @@ setup_remote_repo_with_file() {
   git add .gitattributes $filename
   git commit -m "add $filename" | tee commit.log
 
-  grep "master (root-commit)" commit.log
+  grep "main (root-commit)" commit.log
   grep "2 files changed" commit.log
   grep "create mode 100644 $filename" commit.log
   grep "create mode 100644 .gitattributes" commit.log
 
-  git push origin master 2>&1 | tee push.log
-  grep "master -> master" push.log
+  git push origin main 2>&1 | tee push.log
+  grep "main -> main" push.log
 }
 
 # substring_position returns the position of a substring in a 1-indexed search
@@ -507,7 +559,7 @@ setup() {
     mkdir "$REMOTEDIR"
   fi
 
-  echo "# Git LFS: ${LFS_BIN:-$(which git-lfs)}"
+  echo "# Git LFS: ${LFS_BIN:-$(command -v git-lfs)}"
   git lfs version | sed -e 's/^/# /g'
   git version | sed -e 's/^/# /g'
 
@@ -706,18 +758,6 @@ get_date() {
   fi
 }
 
-# Convert potentially MinGW bash paths to native Windows paths
-# Needed to match generic built paths in test scripts to native paths generated from Go
-native_path() {
-  local arg=$1
-  if [ $IS_WINDOWS -eq 1 ]; then
-    # Use params form to avoid interpreting any '\' characters
-    printf '%s' "$(cygpath -w $arg)"
-  else
-    printf '%s' "$arg"
-  fi
-}
-
 # escape any instance of '\' with '\\' on Windows
 escape_path() {
   local unescaped="$1"
@@ -791,4 +831,62 @@ add_symlink() {
 
   git update-index --add --cacheinfo 120000 "$hashsrc" "$prefix$dest"
   git checkout -- "$dest"
+}
+
+urlify() {
+  if [ "$IS_WINDOWS" -eq 1 ]
+  then
+    echo "$1" | sed -e 's,\\,/,g' -e 's,:,%3a,g' -e 's, ,%20,g'
+  else
+    echo "$1"
+  fi
+}
+
+setup_pure_ssh() {
+  export PATH="$ROOTDIR/t/scutiger/bin:$PATH"
+  if ! command -v git-lfs-transfer >/dev/null 2>&1
+  then
+    if [ -z "$CI" ] || [ -n "$TEST_SKIP_LFS_TRANSFER" ]
+    then
+      echo "No git-lfs-transfer.  Skipping..."
+      exit 0
+    else
+      echo "No git-lfs-transfer.  Failing.."
+      exit 1
+    fi
+  elif [ "$GIT_DEFAULT_HASH" = sha256 ]
+  then
+      # Scutiger's git-lfs-transfer uses libgit2, which doesn't yet do SHA-256
+      # repos.
+      echo "Using SHA-256 repositories.  Skipping..."
+      exit 0
+  fi
+}
+
+ssh_remote() {
+  local reponame="$1"
+  local destination=$(urlify "$(canonical_path "$REMOTEDIR/$reponame.git")")
+  # Prepend a slash iff it lacks one.  Windows compatibiity.
+  [ -z "${destination##/*}" ] || destination="/$destination"
+  echo "ssh://git@127.0.0.1$destination"
+}
+
+# Create a pkt-line message from s, which is an argument string to printf(1).
+pktize() {
+  local s="$1"
+  local len=$(printf "$s" | wc -c)
+  printf "%04x$s" $((len + 4))
+}
+
+pktize_text() {
+  local s="$1"
+  pktize "$s"'\n'
+}
+
+pktize_delim() {
+  printf '0001'
+}
+
+pktize_flush() {
+  printf '0000'
 }

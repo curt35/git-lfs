@@ -4,9 +4,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -90,6 +90,7 @@ func clean(gf *lfs.GitFilter, to io.Writer, from io.Reader, fileName string, fil
 
 func cleanCommand(cmd *cobra.Command, args []string) {
 	requireStdin("This command should be run by the Git 'clean' filter")
+	setupRepository()
 	installHooks(false)
 
 	var fileName string

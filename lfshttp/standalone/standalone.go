@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,12 +12,12 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/subprocess"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/rubyist/tracerx"
 )
 
@@ -50,6 +51,7 @@ type fileHandler struct {
 	remoteConfig *config.Configuration
 	output       *os.File
 	config       *config.Configuration
+	tempdir      string
 }
 
 // fileUrlFromRemote looks up the URL depending on the remote. The remote can be
@@ -101,6 +103,11 @@ func gitDirAtPath(path string) (string, error) {
 	}
 	env = env[:n]
 
+	// Trim any trailing .git path segment.
+	if filepath.Base(path) == ".git" {
+		path = filepath.Dir(path)
+	}
+
 	curdir, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -132,7 +139,7 @@ func gitDirAtPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.EvalSymlinks(gitdir)
+	return tools.CanonicalizeSystemPath(gitdir)
 }
 
 func fixUrlPath(path string) string {
@@ -171,6 +178,11 @@ func newHandler(cfg *config.Configuration, output *os.File, msg *inputMessage) (
 		return nil, err
 	}
 
+	tempdir, err := ioutil.TempDir(cfg.TempDir(), "lfs-standalone-file-*")
+	if err != nil {
+		return nil, err
+	}
+
 	tracerx.Printf("using %q as remote git directory", gitdir)
 
 	return &fileHandler{
@@ -178,6 +190,7 @@ func newHandler(cfg *config.Configuration, output *os.File, msg *inputMessage) (
 		remoteConfig: config.NewIn(gitdir, gitdir),
 		output:       output,
 		config:       cfg,
+		tempdir:      tempdir,
 	}, nil
 }
 
@@ -239,7 +252,7 @@ func (h *fileHandler) download(oid string, size int64) (string, string, error) {
 		return oid, "", err
 	}
 
-	tmp, err := lfs.TempFile(h.config, "download")
+	tmp, err := ioutil.TempFile(h.tempdir, "download")
 	if err != nil {
 		return oid, "", err
 	}
@@ -277,6 +290,9 @@ func ProcessStandaloneData(cfg *config.Configuration, input *os.File, output *os
 		if !handler.dispatch(&msg) {
 			break
 		}
+	}
+	if handler != nil {
+		os.RemoveAll(handler.tempdir)
 	}
 	if err := scanner.Err(); err != nil {
 		return errors.Wrapf(err, "error reading input")

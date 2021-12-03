@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/git"
+	"github.com/git-lfs/git-lfs/v3/git"
 )
 
 type GitFetcher struct {
@@ -189,5 +189,6 @@ var safeKeys = []string{
 	"lfs.gitprotocol",
 	"lfs.locksverify",
 	"lfs.pushurl",
+	"lfs.skipdownloaderrors",
 	"lfs.url",
 }

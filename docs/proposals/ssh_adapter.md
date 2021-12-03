@@ -42,8 +42,7 @@ To initiate a connection, Git LFS should run the following command:
 
 If authentication fails, or some other connection error occurs, errors will be
 read from standard error and displayed to the user.  The operation may be
-`upload`, `download`, or `lock`.  Other operations may be implemented in the
-future.
+`upload`, `download`.  Other operations may be implemented in the future.
 
 Once the connection is established, the server should send a capability
 advertisement:
@@ -95,6 +94,22 @@ to those used if the request is made over HTTP.
 The response code should be 200 if the version is accepted or 400 if it is not.
 Other values are possible if other errors occur.
 
+When the protocol is complete, the client sends a quit request:
+
+```
+quit-request = PKT-LINE("quit" LF) flush-pkt
+```
+
+The server must respond with success and then terminate the connection:
+
+```
+quit-response = PKT-LINE("status 200" LF)
+                flush-pkt
+```
+
+This command exists to help distinguish expected termination from unexpected
+termination.
+
 ### Requests to transfer objects
 
 These commands may be used if the operation was `upload` or `download`.
@@ -117,7 +132,8 @@ size = 1*DIGIT
 
 The `transfer` argument is equivalent to the corresponding value in the HTTP
 JSON API.  The `refname` argument is equivalent to the `name` argument of the
-`ref` object in the HTTP JSON API.
+`ref` object in the HTTP JSON API.  The `hash-algo` argument is equivalent to
+the `hash_algo` argument in the HTTP JSON API.
 
 Unknown arguments should be ignored, as should unknown key-value pairs in the
 `oid-line` production.
@@ -149,6 +165,9 @@ another string, `token`, which is an opaque identifier relevant only to the
 server to help it manage authentication.  These strings must meet the syntax for
 the `value` production above; if arbitrary bytes are needed, Base64 encoding is
 recommended.
+
+The `hash-algo` argument has the same meaning as the `hash_algo` field in the
+HTTP JSON API.
 
 The `expires-in` and `expires-at` key-value pairs have the same meaning as their
 corresponding items from the HTTP JSON API.
@@ -223,12 +242,12 @@ The `verify-object` command is used to verify an object:
 verify-object-request = verify-object-command
                         *argument
                         flush-pkt
-verify-object-command = PKT-LINE("verify-object " oid " " size LF)
+verify-object-command = PKT-LINE("verify-object " oid LF)
 ```
 
-The `size` production represents the size of the object represented by `oid` as
-a decimal integer in bytes.  The `id` and `token` items from the batch request
-must be passed as arguments here, if specified.
+A `size` argument identical to the one used in `put-object` is mandatory.  The
+`id` and `token` items from the batch request must also be passed as arguments
+here, if specified.
 
 The response matches the following:
 
@@ -242,13 +261,10 @@ generic-success-command = PKT-LINE("status 200" LF)
 
 ### Locks
 
-These commands may be used if the operation was `lock`.
-
 The `lock` command may be used to lock a file on a ref:
 ```
 lock-request = lock-command
                *argument
-               delim-pkt
                flush-pkt
 lock-command = PKT-LINE("lock" LF)
 ```
@@ -296,7 +312,7 @@ lock-spec = lock-decl
             path-id
             locked-at
             ownername-id
-            owner-id
+            *owner-id
 lock-decl = PKT-LINE("lock " lock-id LF)
 lock-id = value
 path-id = PKT-LINE("path " lock-id path LF)
@@ -316,6 +332,9 @@ The `next-cursor` argument indicates the next value of the `cursor` argument to
 be passed to the `list-lock` command.  If there is no `next-cursor` argument,
 this is the final response.
 
+The `owner-id` specification is optional if the user specified the command as
+`download` but is required if the command is `upload`.
+
 ```
 unlock-request = unlock-command
                  *argument
@@ -324,5 +343,20 @@ unlock-command = PKT-LINE("unlock " lock-id LF)
 ```
 
 The `force` and `refname` arguments have the same meaning as their corresponding
-values in the HTTP JSON API.  The response matches the `generic-status-response`
-production.
+values in the HTTP JSON API.  The response is as follows:
+
+```
+unlock-response = unlock-success-response | status-error-response
+unlock-success-response = unlock-success-command
+                          *argument
+                          flush-pkt
+unlock-success-command = PKT-LINE("status 200" LF)
+```
+
+The `lock` and `unlock` commands may be issued when the command was `upload`.
+If the remote side has a concept of a repository administrator, it is
+recommended that unlocking a lock that the user does not own be reserved to the
+administrator.
+
+The `list-lock` commands may be issued when the command was `upload` or
+`download`.

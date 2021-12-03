@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/lfshttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xeipuuv/gojsonschema"
@@ -28,7 +28,7 @@ func TestAPIBatch(t *testing.T) {
 		}
 
 		assert.Equal(t, "POST", r.Method)
-		assert.Equal(t, "91", r.Header.Get("Content-Length"))
+		assert.Equal(t, "106", r.Header.Get("Content-Length"))
 
 		bodyLoader, body := gojsonschema.NewReaderLoader(r.Body)
 		bReq := &batchRequest{}

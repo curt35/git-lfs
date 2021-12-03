@@ -16,8 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
 )
 
 // FileOrDirExists determines if a file/dir exists, returns IsDir() results too.
@@ -60,7 +60,7 @@ func ResolveSymlinks(path string) string {
 		return path
 	}
 
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+	if resolved, err := CanonicalizeSystemPath(path); err == nil {
 		return resolved
 	}
 	return path
@@ -285,8 +285,8 @@ type fastWalker struct {
 // rootDir - Absolute path to the top of the repository working directory
 func fastWalkWithExcludeFiles(rootDir string) *fastWalker {
 	excludePaths := []filepathfilter.Pattern{
-		filepathfilter.NewPattern(".git"),
-		filepathfilter.NewPattern("**/.git"),
+		filepathfilter.NewPattern(".git", filepathfilter.GitIgnore),
+		filepathfilter.NewPattern("**/.git", filepathfilter.GitIgnore),
 	}
 
 	limit, _ := strconv.Atoi(os.Getenv("LFS_FASTWALK_LIMIT"))
@@ -304,6 +304,8 @@ func fastWalkWithExcludeFiles(rootDir string) *fastWalker {
 	}
 
 	go func() {
+		defer w.Wait()
+
 		dirFi, err := os.Stat(w.rootDir)
 		if err != nil {
 			w.ch <- fastWalkInfo{Err: err}
@@ -311,7 +313,6 @@ func fastWalkWithExcludeFiles(rootDir string) *fastWalker {
 		}
 
 		w.Walk(true, "", dirFi, excludePaths)
-		w.Wait()
 	}()
 	return w
 }
@@ -476,4 +477,28 @@ func TempFile(dir, pattern string, cfg repositoryPermissionFetcher) (*os.File, e
 func ExecutablePermissions(perms os.FileMode) os.FileMode {
 	// Copy read bits to executable bits.
 	return perms | ((perms & 0444) >> 2)
+}
+
+// CanonicalizePath takes a path and produces a canonical absolute path,
+// performing any OS- or environment-specific path transformations (within the
+// limitations of the Go standard library).  If the path is empty, it returns
+// the empty path with no error.  If missingOk is true, then if the
+// canonicalized path does not exist, an absolute path is given instead.
+func CanonicalizePath(path string, missingOk bool) (string, error) {
+	path, err := TranslateCygwinPath(path)
+	if err != nil {
+		return "", err
+	}
+	if len(path) > 0 {
+		path, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		result, err := CanonicalizeSystemPath(path)
+		if err != nil && os.IsNotExist(err) && missingOk {
+			return path, nil
+		}
+		return result, err
+	}
+	return "", nil
 }

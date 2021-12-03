@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package tools
@@ -11,7 +12,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/errors"
 
 	"github.com/stretchr/testify/assert"
 )

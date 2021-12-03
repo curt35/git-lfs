@@ -1,9 +1,12 @@
 package errors
 
 import (
+	goerrors "errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -90,6 +93,19 @@ func IsNotAPointerError(err error) bool {
 	return false
 }
 
+// IsNotAPointerError indicates the parsed data is not an LFS pointer.
+func IsPointerScanError(err error) bool {
+	if e, ok := err.(interface {
+		PointerScanError() bool
+	}); ok {
+		return e.PointerScanError()
+	}
+	if parent := parentOf(err); parent != nil {
+		return IsPointerScanError(parent)
+	}
+	return false
+}
+
 // IsBadPointerKeyError indicates that the parsed data has an invalid key.
 func IsBadPointerKeyError(err error) bool {
 	if e, ok := err.(interface {
@@ -100,6 +116,20 @@ func IsBadPointerKeyError(err error) bool {
 
 	if parent := parentOf(err); parent != nil {
 		return IsBadPointerKeyError(parent)
+	}
+	return false
+}
+
+// IsProtocolError indicates that the SSH pkt-line protocol data is invalid.
+func IsProtocolError(err error) bool {
+	if e, ok := err.(interface {
+		ProtocolError() bool
+	}); ok {
+		return e.ProtocolError()
+	}
+
+	if parent := parentOf(err); parent != nil {
+		return IsProtocolError(parent)
 	}
 	return false
 }
@@ -319,6 +349,30 @@ func NewNotAPointerError(err error) error {
 	return notAPointerError{newWrappedError(err, "Pointer file error")}
 }
 
+// Definitions for IsPointerScanError()
+
+type PointerScanError struct {
+	treeishOid string
+	path       string
+	*wrappedError
+}
+
+func (e PointerScanError) PointerScanError() bool {
+	return true
+}
+
+func (e PointerScanError) OID() string {
+	return e.treeishOid
+}
+
+func (e PointerScanError) Path() string {
+	return e.path
+}
+
+func NewPointerScanError(err error, treeishOid, path string) error {
+	return PointerScanError{treeishOid, path, newWrappedError(err, "Pointer error")}
+}
+
 type badPointerKeyError struct {
 	Expected string
 	Actual   string
@@ -409,6 +463,20 @@ func NewRetriableError(err error) error {
 	return retriableError{newWrappedError(err, "")}
 }
 
+// Definitions for IsProtocolError()
+
+type protocolError struct {
+	*wrappedError
+}
+
+func (e protocolError) ProtocolError() bool {
+	return true
+}
+
+func NewProtocolError(message string, err error) error {
+	return protocolError{newWrappedError(err, message)}
+}
+
 func parentOf(err error) error {
 	type causer interface {
 		Cause() error
@@ -421,4 +489,15 @@ func parentOf(err error) error {
 	}
 
 	return nil
+}
+
+func ExitStatus(err error) int {
+	var eerr *exec.ExitError
+	if goerrors.As(err, &eerr) {
+		ws, ok := eerr.ProcessState.Sys().(syscall.WaitStatus)
+		if ok {
+			return ws.ExitStatus()
+		}
+	}
+	return -1
 }

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/rubyist/tracerx"
 )
 
@@ -199,7 +199,7 @@ func (c *uploadContext) prepareUpload(unfiltered ...*lfs.WrappedPointer) []*lfs.
 	for _, p := range unfiltered {
 		// object already uploaded in this process, or we've already
 		// seen this OID (see above), skip!
-		if uniqOids.Contains(p.Oid) || c.HasUploaded(p.Oid) {
+		if uniqOids.Contains(p.Oid) || c.HasUploaded(p.Oid) || p.Size == 0 {
 			continue
 		}
 		uniqOids.Add(p.Oid)

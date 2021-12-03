@@ -1,6 +1,6 @@
 package lfs
 
-import "github.com/git-lfs/git-lfs/config"
+import "github.com/git-lfs/git-lfs/v3/config"
 
 // FetchPruneConfig collects together the config options that control fetching and pruning
 type FetchPruneConfig struct {
@@ -21,6 +21,10 @@ type FetchPruneConfig struct {
 	PruneVerifyRemoteAlways bool
 	// Name of remote to check for unpushed and verify checks
 	PruneRemoteName string
+	// Whether to ignore all recent options.
+	PruneRecent bool
+	// Whether to delete everything pushed.
+	PruneForce bool
 }
 
 func NewFetchPruneConfig(git config.Environment) FetchPruneConfig {
@@ -37,5 +41,7 @@ func NewFetchPruneConfig(git config.Environment) FetchPruneConfig {
 		PruneOffsetDays:               git.Int("lfs.pruneoffsetdays", 3),
 		PruneVerifyRemoteAlways:       git.Bool("lfs.pruneverifyremotealways", false),
 		PruneRemoteName:               pruneRemote,
+		PruneRecent:                   false,
+		PruneForce:                    false,
 	}
 }

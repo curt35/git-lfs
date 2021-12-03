@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/git"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/git"
 )
 
 // runCatFileBatch uses 'git cat-file --batch' to get the object contents of a
@@ -17,8 +17,8 @@ import (
 // pointerCh. If a Git Blob is not an LFS pointer, check the lockableSet to see
 // if that blob is for a locked file. Any errors are sent to errCh. An error is
 // returned if the 'git cat-file' command fails to start.
-func runCatFileBatch(pointerCh chan *WrappedPointer, lockableCh chan string, lockableSet *lockableNameSet, revs *StringChannelWrapper, errCh chan error, osEnv config.Environment) error {
-	scanner, err := NewPointerScanner(osEnv)
+func runCatFileBatch(pointerCh chan *WrappedPointer, lockableCh chan string, lockableSet *lockableNameSet, revs *StringChannelWrapper, errCh chan error, gitEnv, osEnv config.Environment) error {
+	scanner, err := NewPointerScanner(gitEnv, osEnv)
 	if err != nil {
 		return err
 	}
@@ -32,7 +32,7 @@ func runCatFileBatch(pointerCh chan *WrappedPointer, lockableCh chan string, loc
 				errCh <- err
 			} else if p := scanner.Pointer(); p != nil {
 				pointerCh <- p
-			} else if b := scanner.BlobSHA(); len(b) == 40 {
+			} else if b := scanner.BlobSHA(); git.HasValidObjectIDLength(b) {
 				if name, ok := lockableSet.Check(b); ok {
 					lockableCh <- name
 				}
@@ -70,8 +70,8 @@ type PointerScanner struct {
 	err         error
 }
 
-func NewPointerScanner(osEnv config.Environment) (*PointerScanner, error) {
-	scanner, err := git.NewObjectScanner(osEnv)
+func NewPointerScanner(gitEnv, osEnv config.Environment) (*PointerScanner, error) {
+	scanner, err := git.NewObjectScanner(gitEnv, osEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (s *PointerScanner) next(blob string) (string, string, *WrappedPointer, err
 
 	var buf *bytes.Buffer
 	var to io.Writer = sha
-	if size <= blobSizeCutoff {
+	if size < blobSizeCutoff {
 		buf = bytes.NewBuffer(make([]byte, 0, size))
 		to = io.MultiWriter(to, buf)
 	}
@@ -150,7 +150,7 @@ func (s *PointerScanner) next(blob string) (string, string, *WrappedPointer, err
 	var pointer *WrappedPointer
 	var contentsSha string
 
-	if size <= blobSizeCutoff {
+	if size < blobSizeCutoff {
 		if p, err := DecodePointer(bytes.NewReader(buf.Bytes())); err != nil {
 			contentsSha = fmt.Sprintf("%x", sha.Sum(nil))
 		} else {

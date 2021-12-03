@@ -1,13 +1,14 @@
 package git
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git/gitattr"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git/gitattr"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/rubyist/tracerx"
 )
 
@@ -56,7 +57,7 @@ func GetRootAttributePaths(mp *gitattr.MacroProcessor, cfg Env) []AttributePath 
 	}
 
 	// The working directory for the root gitattributes file is blank.
-	return attrPaths(mp, af, "", true)
+	return attrPathsFromFile(mp, af, "", true)
 }
 
 // GetSystemAttributePaths behaves as GetAttributePaths, and loads information
@@ -74,7 +75,7 @@ func GetSystemAttributePaths(mp *gitattr.MacroProcessor, env Env) []AttributePat
 		return nil
 	}
 
-	return attrPaths(mp, path, "", true)
+	return attrPathsFromFile(mp, path, "", true)
 }
 
 // GetAttributePaths returns a list of entries in .gitattributes which are
@@ -85,26 +86,29 @@ func GetAttributePaths(mp *gitattr.MacroProcessor, workingDir, gitDir string) []
 	paths := make([]AttributePath, 0)
 
 	for _, file := range findAttributeFiles(workingDir, gitDir) {
-		paths = append(paths, attrPaths(mp, file.path, workingDir, file.readMacros)...)
+		paths = append(paths, attrPathsFromFile(mp, file.path, workingDir, file.readMacros)...)
 	}
 
 	return paths
 }
 
-func attrPaths(mp *gitattr.MacroProcessor, path, workingDir string, readMacros bool) []AttributePath {
+func attrPathsFromFile(mp *gitattr.MacroProcessor, path, workingDir string, readMacros bool) []AttributePath {
 	attributes, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer attributes.Close()
+	return AttrPathsFromReader(mp, path, workingDir, attributes, readMacros)
+}
 
+func AttrPathsFromReader(mp *gitattr.MacroProcessor, path, workingDir string, rdr io.Reader, readMacros bool) []AttributePath {
 	var paths []AttributePath
 
 	relfile, _ := filepath.Rel(workingDir, path)
 	reldir := filepath.Dir(relfile)
 	source := &AttributeSource{Path: relfile}
 
-	lines, eol, err := gitattr.ParseLines(attributes)
+	lines, eol, err := gitattr.ParseLines(rdr)
 	if err != nil {
 		return nil
 	}
@@ -159,7 +163,7 @@ func GetAttributeFilter(workingDir, gitDir string) *filepathfilter.Filter {
 	for _, path := range paths {
 		// Convert all separators to `/` before creating a pattern to
 		// avoid characters being escaped in situations like `subtree\*.md`
-		patterns = append(patterns, filepathfilter.NewPattern(filepath.ToSlash(path.Path)))
+		patterns = append(patterns, filepathfilter.NewPattern(filepath.ToSlash(path.Path), filepathfilter.GitAttributes))
 	}
 
 	return filepathfilter.NewFromPatterns(patterns, nil)

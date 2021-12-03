@@ -1,10 +1,9 @@
 package filepathfilter
 
 import (
-	"path/filepath"
 	"strings"
 
-	"github.com/git-lfs/wildmatch"
+	"github.com/git-lfs/wildmatch/v2"
 	"github.com/rubyist/tracerx"
 )
 
@@ -16,18 +15,51 @@ type Pattern interface {
 }
 
 type Filter struct {
-	include []Pattern
-	exclude []Pattern
+	include      []Pattern
+	exclude      []Pattern
+	defaultValue bool
 }
 
-func NewFromPatterns(include, exclude []Pattern) *Filter {
-	return &Filter{include: include, exclude: exclude}
+type PatternType bool
+
+const (
+	GitIgnore     = PatternType(false)
+	GitAttributes = PatternType(true)
+)
+
+func (p PatternType) String() string {
+	if p == GitIgnore {
+		return "gitignore"
+	}
+	return "gitattributes"
 }
 
-func New(include, exclude []string) *Filter {
+type options struct {
+	defaultValue bool
+}
+
+type option func(*options)
+
+// DefaultValue is an option representing the default value of a filepathfilter
+// if no patterns match.  If this option is not provided, the default is true.
+func DefaultValue(val bool) option {
+	return func(args *options) {
+		args.defaultValue = val
+	}
+}
+
+func NewFromPatterns(include, exclude []Pattern, setters ...option) *Filter {
+	args := &options{defaultValue: true}
+	for _, setter := range setters {
+		setter(args)
+	}
+	return &Filter{include: include, exclude: exclude, defaultValue: args.defaultValue}
+}
+
+func New(include, exclude []string, ptype PatternType, setters ...option) *Filter {
 	return NewFromPatterns(
-		convertToWildmatch(include),
-		convertToWildmatch(exclude))
+		convertToWildmatch(include, ptype),
+		convertToWildmatch(exclude, ptype), setters...)
 }
 
 // Include returns the result of calling String() on each Pattern in the
@@ -66,6 +98,15 @@ func (f *Filter) Allows(filename string) bool {
 		return false
 	}
 
+	// Beyond this point, the only values we can logically return are false
+	// or the default value.  If the default is false, then there's no point
+	// traversing the exclude patterns because the return value will always
+	// be false; we'd do extra work for no functional benefit.
+	if !included && !f.defaultValue {
+		tracerx.Printf("filepathfilter: rejecting %q", filename)
+		return false
+	}
+
 	for _, ex := range f.exclude {
 		if ex.Match(filename) {
 			tracerx.Printf("filepathfilter: rejecting %q via %q", filename, ex.String())
@@ -73,22 +114,18 @@ func (f *Filter) Allows(filename string) bool {
 		}
 	}
 
+	// No patterns matched and our default value is true.
 	tracerx.Printf("filepathfilter: accepting %q", filename)
 	return true
 }
 
 type wm struct {
-	w    *wildmatch.Wildmatch
-	p    string
-	dirs bool
+	w *wildmatch.Wildmatch
+	p string
 }
 
 func (w *wm) Match(filename string) bool {
-	return w.w.Match(w.chomp(filename))
-}
-
-func (w *wm) chomp(filename string) string {
-	return strings.TrimSuffix(filename, string(filepath.Separator))
+	return w.w.Match(filename)
 }
 
 func (w *wm) String() string {
@@ -99,54 +136,31 @@ const (
 	sep byte = '/'
 )
 
-func NewPattern(p string) Pattern {
-	pp := p
+func NewPattern(p string, ptype PatternType) Pattern {
+	tracerx.Printf("filepathfilter: creating pattern %q of type %v", p, ptype)
 
-	// Special case: the below patterns match anything according to existing
-	// behavior.
-	switch pp {
-	case `*`, `.`, `./`, `.\`:
-		pp = join("**", "*")
-	}
-
-	dirs := strings.Contains(pp, string(sep))
-	rooted := strings.HasPrefix(pp, string(sep))
-	wild := strings.Contains(pp, "*")
-
-	if !dirs && !wild {
-		// Special case: if pp is a literal string (optionally including
-		// a character class), rewrite it is a substring match.
-		pp = join("**", pp, "**")
-	} else {
-		if dirs && !rooted {
-			// Special case: if there are any directory separators,
-			// rewrite "pp" as a substring match.
-			if !wild {
-				pp = join("**", pp, "**")
-			}
-		} else {
-			if rooted {
-				// Special case: if there are not any directory
-				// separators, rewrite "pp" as a substring
-				// match.
-				pp = join(pp, "**")
-			} else {
-				// Special case: if there are not any directory
-				// separators, rewrite "pp" as a substring
-				// match.
-				pp = join("**", pp)
-			}
+	switch ptype {
+	case GitIgnore:
+		return &wm{
+			p: p,
+			w: wildmatch.NewWildmatch(
+				p,
+				wildmatch.SystemCase,
+				wildmatch.Contents,
+			),
 		}
-	}
-	tracerx.Printf("filepathfilter: rewrite %q as %q", p, pp)
-
-	return &wm{
-		p: p,
-		w: wildmatch.NewWildmatch(
-			pp,
-			wildmatch.SystemCase,
-		),
-		dirs: dirs,
+	case GitAttributes:
+		return &wm{
+			p: p,
+			w: wildmatch.NewWildmatch(
+				p,
+				wildmatch.SystemCase,
+				wildmatch.Basename,
+				wildmatch.GitAttributes,
+			),
+		}
+	default:
+		panic("unreachable")
 	}
 }
 
@@ -166,10 +180,10 @@ func join(paths ...string) string {
 	return joined
 }
 
-func convertToWildmatch(rawpatterns []string) []Pattern {
+func convertToWildmatch(rawpatterns []string, ptype PatternType) []Pattern {
 	patterns := make([]Pattern, len(rawpatterns))
 	for i, raw := range rawpatterns {
-		patterns[i] = NewPattern(raw)
+		patterns[i] = NewPattern(raw, ptype)
 	}
 	return patterns
 }

@@ -3,8 +3,8 @@ package tq
 import (
 	"testing"
 
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/lfshttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,10 +31,6 @@ func (a *testAdapter) Add(ts ...*Transfer) (retries <-chan TransferResult) {
 }
 
 func (a *testAdapter) End() {
-}
-
-func (a *testAdapter) ClearTempStorage() error {
-	return nil
 }
 
 func newTestAdapter(name string, dir Direction) Adapter {

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/locking"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -18,16 +20,6 @@ var (
 )
 
 func lockCommand(cmd *cobra.Command, args []string) {
-	if len(args) == 0 {
-		Print("Usage: git lfs lock <path>")
-		return
-	}
-
-	path, err := lockPath(args[0])
-	if err != nil {
-		Exit(err.Error())
-	}
-
 	if len(lockRemote) > 0 {
 		cfg.SetRemote(lockRemote)
 	}
@@ -37,19 +29,42 @@ func lockCommand(cmd *cobra.Command, args []string) {
 	lockClient.RemoteRef = refUpdate.Right()
 	defer lockClient.Close()
 
-	lock, err := lockClient.LockFile(path)
-	if err != nil {
-		Exit("Lock failed: %v", errors.Cause(err))
+	success := true
+	locks := make([]locking.Lock, 0, len(args))
+	for _, path := range args {
+		path, err := lockPath(path)
+		if err != nil {
+			Error(err.Error())
+			success = false
+			continue
+		}
+
+		lock, err := lockClient.LockFile(path)
+		if err != nil {
+			Error("Locking %s failed: %v", path, errors.Cause(err))
+			success = false
+			continue
+		}
+
+		locks = append(locks, lock)
+
+		if locksCmdFlags.JSON {
+			continue
+		}
+
+		Print("Locked %s", path)
 	}
 
 	if locksCmdFlags.JSON {
-		if err := json.NewEncoder(os.Stdout).Encode(lock); err != nil {
+		if err := json.NewEncoder(os.Stdout).Encode(locks); err != nil {
 			Error(err.Error())
+			success = false
 		}
-		return
 	}
 
-	Print("Locked %s", path)
+	if !success {
+		os.Exit(2)
+	}
 }
 
 // lockPaths relativizes the given filepath such that it is relative to the root
@@ -60,7 +75,7 @@ func lockCommand(cmd *cobra.Command, args []string) {
 // Windows path of "\foo\bar" will be normalized to "foo/bar".
 //
 // If the root directory, working directory, or file cannot be
-// determined/opened, an error will be returned. If the file in question is
+// determined, an error will be returned. If the file in question is
 // actually a directory, an error will be returned. Otherwise, the cleaned path
 // will be returned.
 //
@@ -79,13 +94,21 @@ func lockPath(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	wd, err = filepath.EvalSymlinks(wd)
+	wd, err = tools.CanonicalizeSystemPath(wd)
 	if err != nil {
 		return "", errors.Wrapf(err,
 			"could not follow symlinks for %s", wd)
 	}
 
-	abs := filepath.Join(wd, file)
+	var abs string
+	if filepath.IsAbs(file) {
+		abs, err = tools.CanonicalizeSystemPath(file)
+		if err != nil {
+			return "", fmt.Errorf("lfs: unable to canonicalize path %q: %v", file, err)
+		}
+	} else {
+		abs = filepath.Join(wd, file)
+	}
 	path, err := filepath.Rel(repo, abs)
 	if err != nil {
 		return "", err
@@ -96,15 +119,11 @@ func lockPath(file string) (string, error) {
 		return "", fmt.Errorf("lfs: unable to canonicalize path %q", path)
 	}
 
-	if stat, err := os.Stat(abs); err != nil {
-		return "", err
-	} else {
-		if stat.IsDir() {
-			return path, fmt.Errorf("lfs: cannot lock directory: %s", file)
-		}
-
-		return filepath.ToSlash(path), nil
+	if stat, err := os.Stat(abs); err == nil && stat.IsDir() {
+		return path, fmt.Errorf("lfs: cannot lock directory: %s", file)
 	}
+
+	return filepath.ToSlash(path), nil
 }
 
 func init() {

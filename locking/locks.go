@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tools/kv"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tools/kv"
 	"github.com/rubyist/tracerx"
 )
 
@@ -42,7 +42,7 @@ type LockCacher interface {
 type Client struct {
 	Remote    string
 	RemoteRef *git.Ref
-	client    *lockClient
+	client    lockClient
 	cache     LockCacher
 	cacheDir  string
 	cfg       *config.Configuration
@@ -63,7 +63,7 @@ type Client struct {
 func NewClient(remote string, lfsClient *lfsapi.Client, cfg *config.Configuration) (*Client, error) {
 	return &Client{
 		Remote:             remote,
-		client:             &lockClient{Client: lfsClient},
+		client:             newGenericLockClient(lfsClient),
 		cache:              &nilLockCacher{},
 		cfg:                cfg,
 		ModifyIgnoredFiles: lfsClient.GitEnv().Bool("lfs.lockignoredfiles", false),
@@ -125,9 +125,11 @@ func (c *Client) LockFile(path string) (Lock, error) {
 		return Lock{}, errors.Wrap(err, "make lockpath absolute")
 	}
 
-	// Ensure writeable on return
-	if err := tools.SetFileWriteFlag(abs, true); err != nil {
-		return Lock{}, err
+	// If the file exists, ensure that it's writeable on return
+	if tools.FileExists(abs) {
+		if err := tools.SetFileWriteFlag(abs, true); err != nil {
+			return Lock{}, errors.Wrap(err, "set file write flag")
+		}
 	}
 
 	return lock, nil
@@ -268,14 +270,12 @@ func (c *Client) SearchLocksVerifiable(limit int, cached bool) (ourLocks, theirL
 		c.cache.Clear()
 
 		for {
-			list, res, err := c.client.SearchVerifiable(c.Remote, body)
-			if res != nil {
-				switch res.StatusCode {
-				case http.StatusNotFound, http.StatusNotImplemented:
-					return ourLocks, theirLocks, errors.NewNotImplementedError(err)
-				case http.StatusForbidden:
-					return ourLocks, theirLocks, errors.NewAuthError(err)
-				}
+			list, status, err := c.client.SearchVerifiable(c.Remote, body)
+			switch status {
+			case http.StatusNotFound, http.StatusNotImplemented:
+				return ourLocks, theirLocks, errors.NewNotImplementedError(err)
+			case http.StatusForbidden:
+				return ourLocks, theirLocks, errors.NewAuthError(err)
 			}
 
 			if err != nil {

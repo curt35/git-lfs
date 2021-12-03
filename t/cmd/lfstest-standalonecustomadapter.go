@@ -1,3 +1,4 @@
+//go:build testtools
 // +build testtools
 
 package main
@@ -12,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 var backupDir string

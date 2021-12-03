@@ -35,7 +35,7 @@ begin_test "batch transfer"
   git add a.dat
   git add .gitattributes
   git commit -m "add a.dat" 2>&1 | tee commit.log
-  grep "master (root-commit)" commit.log
+  grep "main (root-commit)" commit.log
   grep "2 files changed" commit.log
   grep "create mode 100644 a.dat" commit.log
   grep "create mode 100644 .gitattributes" commit.log
@@ -43,25 +43,25 @@ begin_test "batch transfer"
   [ "a" = "$(cat a.dat)" ]
 
   # This is a small shell function that runs several git commands together.
-  assert_pointer "master" "a.dat" "$contents_oid" 1
+  assert_pointer "main" "a.dat" "$contents_oid" 1
 
   refute_server_object "$reponame" "$contents_oid"
 
   # This pushes to the remote repository set up at the top of the test.
-  git push origin master 2>&1 | tee push.log
+  git push origin main 2>&1 | tee push.log
   grep "Uploading LFS objects: 100% (1/1), 1 B" push.log
-  grep "master -> master" push.log
+  grep "main -> main" push.log
 
   assert_server_object "$reponame" "$contents_oid"
 
   # change to the clone's working directory
   cd ../clone
 
-  git pull
+  git pull origin main
 
   [ "a" = "$(cat a.dat)" ]
 
-  assert_pointer "master" "a.dat" "$contents_oid" 1
+  assert_pointer "main" "a.dat" "$contents_oid" 1
 )
 end_test
 
@@ -88,7 +88,7 @@ begin_test "batch transfers occur in reverse order by size"
   git add *.dat
   git commit -m "add small and large objects"
 
-  GIT_CURL_VERBOSE=1 git push origin master 2>&1 | tee push.log
+  GIT_CURL_VERBOSE=1 git push origin main 2>&1 | tee push.log
 
   batch="$(grep "{\"operation\":\"upload\"" push.log | head -1)"
 
@@ -101,7 +101,48 @@ begin_test "batch transfers occur in reverse order by size"
 )
 end_test
 
-begin_test "batch transfers with ssh endpoint"
+begin_test "batch transfers succeed with an empty hash algorithm"
+(
+  set -e
+
+  reponame="batch-test-empty-algo"
+  contents="batch-hash-algo-empty"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  printf "hi" > good.dat
+  printf "%s" "$contents" > special.dat
+  git add .gitattributes good.dat special.dat
+  git commit -m "hi"
+
+  git push origin main 2>&1 | tee push.log
+  assert_server_object "$reponame" "$(calc_oid "$contents")"
+)
+end_test
+
+begin_test "batch transfers fail with an unknown hash algorithm"
+(
+  set -e
+
+  reponame="batch-test-invalid-algo"
+  contents="batch-hash-algo-invalid"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  printf "hi" > good.dat
+  printf "%s" "$contents" > special.dat
+  git add .gitattributes good.dat special.dat
+  git commit -m "hi"
+
+  git push origin main 2>&1 | tee push.log
+  grep 'unsupported hash algorithm' push.log
+  refute_server_object "$reponame" "$(calc_oid "$contents")"
+)
+end_test
+
+begin_test "batch transfers with ssh endpoint (git-lfs-authenticate)"
 (
   set -e
 
@@ -111,37 +152,41 @@ begin_test "batch transfers with ssh endpoint"
 
   sshurl="${GITSERVER/http:\/\//ssh://git@}/$reponame"
   git config lfs.url "$sshurl"
-  git lfs env
 
   contents="test"
-  oid="$(calc_oid "$contents")"
   git lfs track "*.dat"
   printf "%s" "$contents" > test.dat
   git add .gitattributes test.dat
   git commit -m "initial commit"
 
-  git push origin master 2>&1
+  git push origin main 2>&1
 )
 end_test
 
-begin_test "batch transfers with ntlm server"
+begin_test "batch transfers with ssh endpoint (git-lfs-transfer)"
 (
   set -e
 
-  reponame="ntlmtest"
+  setup_pure_ssh
+
+  reponame="batch-ssh-transfer"
   setup_remote_repo "$reponame"
-
-  printf "ntlmdomain\\\ntlmuser:ntlmpass" > "$CREDSDIR/127.0.0.1--$reponame"
-
   clone_repo "$reponame" "$reponame"
 
+  sshurl=$(ssh_remote "$reponame")
+  git config lfs.url "$sshurl"
+
   contents="test"
-  oid="$(calc_oid "$contents")"
   git lfs track "*.dat"
   printf "%s" "$contents" > test.dat
   git add .gitattributes test.dat
   git commit -m "initial commit"
 
-  GIT_CURL_VERBOSE=1 git push origin master 2>&1
+  git push origin main 2>&1
+  cd ..
+  GIT_TRACE=1 git clone "$sshurl" "$reponame-2" 2>&1 | tee trace.log
+  grep "lfs-ssh-echo.*git-lfs-transfer .*$reponame.git download" trace.log
+  cd "$reponame-2"
+  git lfs fsck
 )
 end_test

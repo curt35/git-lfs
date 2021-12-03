@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/rubyist/tracerx"
 )
 
@@ -20,14 +20,8 @@ type basicDownloadAdapter struct {
 	*adapterBase
 }
 
-func (a *basicDownloadAdapter) ClearTempStorage() error {
-	return os.RemoveAll(a.tempDir())
-}
-
 func (a *basicDownloadAdapter) tempDir() string {
-	// Must be dedicated to this adapter as deleted by ClearTempStorage
-	// Also make local to this repo not global, and separate to localstorage temp,
-	// which gets cleared at the end of every invocation
+	// Shared with the SSH adapter.
 	d := filepath.Join(a.fs.LFSStorageDir, "incomplete")
 	if err := tools.MkdirAll(d, a.fs); err != nil {
 		return os.TempDir()

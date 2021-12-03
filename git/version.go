@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/subprocess"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
 	"github.com/rubyist/tracerx"
 )
 

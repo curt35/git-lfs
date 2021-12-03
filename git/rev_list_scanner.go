@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/errors"
 	"github.com/rubyist/tracerx"
 )
 
@@ -153,10 +153,6 @@ var (
 	// ambiguousRegex is a regular expression matching the output of stderr
 	// when ambiguous refnames are encountered.
 	ambiguousRegex = regexp.MustCompile(`warning: refname (.*) is ambiguous`)
-
-	// z40 is a regular expression matching the empty blob/commit/tree
-	// SHA: "0000000000000000000000000000000000000000".
-	z40 = regexp.MustCompile(`\^?0{40}`)
 )
 
 // NewRevListScanner instantiates a new RevListScanner instance scanning all
@@ -225,7 +221,7 @@ func NewRevListScanner(include, excluded []string, opt *ScanRefsOptions) (*RevLi
 // occurred.
 func revListArgs(include, exclude []string, opt *ScanRefsOptions) (io.Reader, []string, error) {
 	var stdin io.Reader
-	args := []string{"rev-list", "--stdin"}
+	args := []string{"rev-list"}
 	if !opt.CommitsOnly {
 		args = append(args, "--objects")
 	}
@@ -251,6 +247,7 @@ func revListArgs(include, exclude []string, opt *ScanRefsOptions) (io.Reader, []
 	case ScanAllMode:
 		args = append(args, "--all")
 	case ScanRangeToRemoteMode:
+		args = append(args, "--ignore-missing")
 		if len(opt.SkippedRefs) == 0 {
 			args = append(args, "--not", "--remotes="+opt.Remote)
 			stdin = strings.NewReader(strings.Join(
@@ -263,7 +260,7 @@ func revListArgs(include, exclude []string, opt *ScanRefsOptions) (io.Reader, []
 	default:
 		return nil, nil, errors.Errorf("unknown scan type: %d", opt.Mode)
 	}
-	return stdin, append(args, "--"), nil
+	return stdin, append(args, "--stdin", "--"), nil
 }
 
 func includeExcludeShas(include, exclude []string) []string {
@@ -287,12 +284,14 @@ func nonZeroShas(all []string) []string {
 	nz := make([]string, 0, len(all))
 
 	for _, sha := range all {
-		if len(sha) > 0 && !z40.MatchString(sha) {
+		if len(sha) > 0 && !IsZeroObjectID(sha) {
 			nz = append(nz, sha)
 		}
 	}
 	return nz
 }
+
+var startsWithObjectID = regexp.MustCompile(fmt.Sprintf(`\A%s`, ObjectIDRegex))
 
 // Name is an optional field that gives the name of the object (if the object is
 // a tree, blob).
@@ -344,19 +343,23 @@ func (s *RevListScanner) scan() ([]byte, string, error) {
 	}
 
 	line := strings.TrimSpace(s.s.Text())
-	if len(line) < 40 {
+	if len(line) < ObjectIDLengths[0] {
 		return nil, "", nil
 	}
 
-	sha1, err := hex.DecodeString(line[:40])
+	oidhex := startsWithObjectID.FindString(line)
+	if len(oidhex) == 0 {
+		return nil, "", fmt.Errorf("missing object id in line (got %q)", line)
+	}
+	oid, err := hex.DecodeString(oidhex)
 	if err != nil {
 		return nil, "", err
 	}
 
 	var name string
-	if len(line) > 40 {
-		name = line[41:]
+	if len(line) > len(oidhex) {
+		name = line[len(oidhex)+1:]
 	}
 
-	return sha1, name, nil
+	return oid, name, nil
 }

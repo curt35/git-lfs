@@ -16,16 +16,45 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/fs"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/fs"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
 )
+
+func init() {
+	path := os.Getenv("PATH")
+	sep := ""
+	if path != "" {
+		if runtime.GOOS == "windows" {
+			sep = ";"
+		} else {
+			sep = ":"
+		}
+	}
+
+	// Strip the trailing "t/cmd/util/testutils.go" from the path to this
+	// source file to create a path to the working tree's "bin" directory,
+	// then prepend that to the PATH environment variable to ensure our
+	// "git-lfs" binary is used in preference to any installed versions when
+	// executing the Go tests.
+	_, srcdir, _, _ := runtime.Caller(0)
+	for i := 0; i < 4; i++ {
+		srcdir = filepath.Dir(srcdir)
+	}
+	var err error
+	srcdir, err = filepath.Abs(srcdir)
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("PATH", filepath.Join(srcdir, "bin")+sep+path)
+}
 
 type RepoType int
 
@@ -307,10 +336,10 @@ type CommitInput struct {
 	CommitDate time.Time
 	// List of files to include in this commit
 	Files []*FileInput
-	// List of parent branches (all branches must have been created in a previous NewBranch or be master)
+	// List of parent branches (all branches must have been created in a previous NewBranch or be main)
 	// Can be omitted to just use the parent of the previous commit
 	ParentBranches []string
-	// Name of a new branch we should create at this commit (optional - master not required)
+	// Name of a new branch we should create at this commit (optional - main not required)
 	NewBranch string
 	// Names of any tags we should create at this commit (optional)
 	Tags []string
@@ -367,7 +396,7 @@ func (repo *Repo) AddCommits(inputs []*CommitInput) []*CommitOutput {
 		repo.callback.Fatalf("Can't chdir to repo %v", err)
 	}
 	// Used to check whether we need to checkout another commit before
-	lastBranch := "master"
+	lastBranch := "main"
 	outputs := make([]*CommitOutput, 0, len(inputs))
 
 	for i, input := range inputs {

@@ -1,13 +1,12 @@
-// +build !linux
-// +build !darwin !cgo
-// +build !windows
+//go:build !linux && !darwin && !windows
+// +build !linux,!darwin,!windows
 
 package tools
 
 import (
 	"io"
 
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/errors"
 )
 
 func CheckCloneFileSupported(dir string) (supported bool, err error) {

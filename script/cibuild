@@ -2,7 +2,7 @@
 set -e
 
 # Strip out CI environment variables which cause tests to fail.
-unset $(env | grep -E '^GIT(HUB)?_' | sed -e 's/=.*$//')
+unset $(env | grep -E '^GIT(HUB)?_' | grep -v '^GIT_DEFAULT_HASH=' | sed -e 's/=.*$//')
 
 UNAME=$(uname -s)
 X=""
@@ -12,6 +12,9 @@ if [[ $UNAME == MINGW* || $UNAME == MSYS* || $UNAME == CYGWIN* ]]; then
   export GIT_LFS_NO_TEST_COUNT=1
   export GIT_LFS_LOCK_ACQUIRE_DISABLED=1
 fi
+
+# Build git-lfs-transfer from scutiger.
+cargo install --root t/scutiger scutiger-lfs
 
 # Set GOPATH if it isn't already set.
 eval "$(go env | grep GOPATH)"
@@ -38,8 +41,11 @@ pushd t >/dev/null
 popd >/dev/null
 
 echo "Looking for trailing whitespace..."
-! git grep -lE '[[:space:]]+$' | \
-  grep -vE '(^vendor/|\.git/(objects/|index)|\.bat$)'
+if git grep -lE '[[:space:]]+$' | \
+   grep -vE '(^vendor/|\.git/(objects/|index)|\.bat$)'
+then
+  exit 1
+fi
 
 echo "Formatting files..."
 # Building and installing goimports and goversioninfo will have modified go.mod

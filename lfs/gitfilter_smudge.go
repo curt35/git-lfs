@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tools/humanize"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tools/humanize"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/rubyist/tracerx"
 )
 
@@ -71,7 +71,9 @@ func (f *GitFilter) Smudge(writer io.Writer, ptr *Pointer, workingfile string, d
 
 	var n int64
 
-	if statErr != nil || stat == nil {
+	if ptr.Size == 0 {
+		return 0, nil
+	} else if statErr != nil || stat == nil {
 		if download {
 			n, err = f.downloadFile(writer, ptr, workingfile, mediafile, manifest, cb)
 		} else {
@@ -112,8 +114,9 @@ func (f *GitFilter) downloadFile(writer io.Writer, ptr *Pointer, workingfile, me
 			} else {
 				multiErr = e
 			}
-			return 0, errors.Wrapf(multiErr, "Error downloading %s (%s)", workingfile, ptr.Oid)
 		}
+
+		return 0, errors.Wrapf(multiErr, "Error downloading %s (%s)", workingfile, ptr.Oid)
 	}
 
 	return f.readLocalFile(writer, ptr, mediafile, workingfile, nil)

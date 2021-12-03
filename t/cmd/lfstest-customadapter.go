@@ -1,3 +1,4 @@
+//go:build testtools
 // +build testtools
 
 package main
@@ -14,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 var cfg = config.New()

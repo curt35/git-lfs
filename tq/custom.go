@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/fs"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/fs"
+	"github.com/git-lfs/git-lfs/v3/tools"
 
-	"github.com/git-lfs/git-lfs/subprocess"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
 	"github.com/rubyist/tracerx"
 )
 
@@ -117,11 +117,6 @@ func (a *customAdapter) Begin(cfg AdapterConfig, cb ProgressCallback) error {
 
 	// If config says not to launch multiple processes, downgrade incoming value
 	return a.adapterBase.Begin(&customAdapterConfig{AdapterConfig: cfg}, cb)
-}
-
-func (a *customAdapter) ClearTempStorage() error {
-	// no action required
-	return nil
 }
 
 func (a *customAdapter) WorkerStarting(workerNum int) (interface{}, error) {

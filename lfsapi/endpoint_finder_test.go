@@ -1,11 +1,14 @@
 package lfsapi
 
 import (
+	"io/ioutil"
+	"os"
 	"runtime"
 	"testing"
 
-	"github.com/git-lfs/git-lfs/creds"
-	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/creds"
+	"github.com/git-lfs/git-lfs/v3/lfshttp"
+	"github.com/git-lfs/git-lfs/v3/ssh"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,8 +19,8 @@ func TestEndpointDefaultsToOrigin(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "abc", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointOverridesOrigin(t *testing.T) {
@@ -28,8 +31,8 @@ func TestEndpointOverridesOrigin(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "abc", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointNoOverrideDefaultRemote(t *testing.T) {
@@ -40,8 +43,8 @@ func TestEndpointNoOverrideDefaultRemote(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "abc", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointUseAlternateRemote(t *testing.T) {
@@ -52,8 +55,8 @@ func TestEndpointUseAlternateRemote(t *testing.T) {
 
 	e := finder.Endpoint("download", "other")
 	assert.Equal(t, "def", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointAddsLfsSuffix(t *testing.T) {
@@ -63,8 +66,8 @@ func TestEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestBareEndpointAddsLfsSuffix(t *testing.T) {
@@ -74,8 +77,8 @@ func TestBareEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointSeparateClonePushUrl(t *testing.T) {
@@ -86,13 +89,13 @@ func TestEndpointSeparateClonePushUrl(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 
 	e = finder.Endpoint("upload", "")
 	assert.Equal(t, "https://readwrite.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointOverriddenSeparateClonePushLfsUrl(t *testing.T) {
@@ -105,13 +108,13 @@ func TestEndpointOverriddenSeparateClonePushLfsUrl(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://examplelfs.com/foo/bar", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 
 	e = finder.Endpoint("upload", "")
 	assert.Equal(t, "https://readwritelfs.com/foo/bar", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestEndpointGlobalSeparateLfsPush(t *testing.T) {
@@ -122,13 +125,13 @@ func TestEndpointGlobalSeparateLfsPush(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://readonly.com/foo/bar", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 
 	e = finder.Endpoint("upload", "")
 	assert.Equal(t, "https://write.com/foo/bar", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
 }
 
 func TestSSHEndpointOverridden(t *testing.T) {
@@ -139,9 +142,9 @@ func TestSSHEndpointOverridden(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestSSHEndpointAddsLfsSuffix(t *testing.T) {
@@ -151,9 +154,9 @@ func TestSSHEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestSSHCustomPortEndpointAddsLfsSuffix(t *testing.T) {
@@ -163,9 +166,9 @@ func TestSSHCustomPortEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "9000", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "9000", e.SSHMetadata.Port)
 }
 
 func TestGitSSHEndpointAddsLfsSuffix(t *testing.T) {
@@ -175,9 +178,9 @@ func TestGitSSHEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestGitSSHCustomPortEndpointAddsLfsSuffix(t *testing.T) {
@@ -187,9 +190,9 @@ func TestGitSSHCustomPortEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "9000", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "9000", e.SSHMetadata.Port)
 }
 
 func TestSSHGitEndpointAddsLfsSuffix(t *testing.T) {
@@ -199,9 +202,9 @@ func TestSSHGitEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestSSHGitCustomPortEndpointAddsLfsSuffix(t *testing.T) {
@@ -211,9 +214,9 @@ func TestSSHGitCustomPortEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar", e.SshPath)
-	assert.Equal(t, "9000", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "/foo/bar", e.SSHMetadata.Path)
+	assert.Equal(t, "9000", e.SSHMetadata.Port)
 }
 
 func TestBareSSHEndpointAddsLfsSuffix(t *testing.T) {
@@ -223,9 +226,9 @@ func TestBareSSHEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar.git", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "foo/bar.git", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestBareSSSHEndpointWithCustomPortInBrackets(t *testing.T) {
@@ -235,9 +238,9 @@ func TestBareSSSHEndpointWithCustomPortInBrackets(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar.git", e.SshPath)
-	assert.Equal(t, "2222", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "foo/bar.git", e.SSHMetadata.Path)
+	assert.Equal(t, "2222", e.SSHMetadata.Port)
 }
 
 func TestSSHEndpointFromGlobalLfsUrl(t *testing.T) {
@@ -247,9 +250,9 @@ func TestSSHEndpointFromGlobalLfsUrl(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git", e.Url)
-	assert.Equal(t, "git@example.com", e.SshUserAndHost)
-	assert.Equal(t, "foo/bar.git", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "git@example.com", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "foo/bar.git", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestHTTPEndpointAddsLfsSuffix(t *testing.T) {
@@ -259,9 +262,9 @@ func TestHTTPEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "http://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestBareHTTPEndpointAddsLfsSuffix(t *testing.T) {
@@ -271,9 +274,9 @@ func TestBareHTTPEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "http://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestGitEndpointAddsLfsSuffix(t *testing.T) {
@@ -283,9 +286,9 @@ func TestGitEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestGitEndpointAddsLfsSuffixWithCustomProtocol(t *testing.T) {
@@ -296,9 +299,9 @@ func TestGitEndpointAddsLfsSuffixWithCustomProtocol(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "http://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
 func TestBareGitEndpointAddsLfsSuffix(t *testing.T) {
@@ -308,37 +311,97 @@ func TestBareGitEndpointAddsLfsSuffix(t *testing.T) {
 
 	e := finder.Endpoint("download", "")
 	assert.Equal(t, "https://example.com/foo/bar.git/info/lfs", e.Url)
-	assert.Equal(t, "", e.SshUserAndHost)
-	assert.Equal(t, "", e.SshPath)
-	assert.Equal(t, "", e.SshPort)
+	assert.Equal(t, "", e.SSHMetadata.UserAndHost)
+	assert.Equal(t, "", e.SSHMetadata.Path)
+	assert.Equal(t, "", e.SSHMetadata.Port)
 }
 
-func TestLocalPathEndpointAddsDotGitDir(t *testing.T) {
+func TestLocalPathEndpointAddsDotGitForWorkingRepo(t *testing.T) {
 	// Windows will add a drive letter to the paths below since we
 	// canonicalize them.
 	if runtime.GOOS == "windows" {
 		return
 	}
 
+	path, err := ioutil.TempDir("", "lfsRepo")
+	assert.Nil(t, err)
+	path = path + "/local/path"
+	err = os.MkdirAll(path+"/.git", 0755)
+	assert.Nil(t, err)
+
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
-		"remote.origin.url": "/local/path",
+		"remote.origin.url": path,
 	}))
 	e := finder.Endpoint("download", "")
-	assert.Equal(t, "file:///local/path/.git", e.Url)
+	assert.Equal(t, "file://"+path+"/.git", e.Url)
+
+	os.RemoveAll(path)
 }
 
-func TestLocalPathEndpointPreservesDotGit(t *testing.T) {
+func TestLocalPathEndpointPreservesDotGitForWorkingRepo(t *testing.T) {
 	// Windows will add a drive letter to the paths below since we
 	// canonicalize them.
 	if runtime.GOOS == "windows" {
 		return
 	}
 
+	path, err := ioutil.TempDir("", "lfsRepo")
+	assert.Nil(t, err)
+	path = path + "/local/path/.git"
+	err = os.MkdirAll(path, 0755)
+	assert.Nil(t, err)
+
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
-		"remote.origin.url": "/local/path.git",
+		"remote.origin.url": path,
 	}))
 	e := finder.Endpoint("download", "")
-	assert.Equal(t, "file:///local/path.git", e.Url)
+	assert.Equal(t, "file://"+path, e.Url)
+
+	os.RemoveAll(path)
+}
+
+func TestLocalPathEndpointPreservesNoDotGitForBareRepo(t *testing.T) {
+	// Windows will add a drive letter to the paths below since we
+	// canonicalize them.
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	path, err := ioutil.TempDir("", "lfsRepo")
+	assert.Nil(t, err)
+	path = path + "/local/path"
+	err = os.MkdirAll(path, 0755)
+	assert.Nil(t, err)
+
+	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
+		"remote.origin.url": path,
+	}))
+	e := finder.Endpoint("download", "")
+	assert.Equal(t, "file://"+path, e.Url)
+
+	os.RemoveAll(path)
+}
+
+func TestLocalPathEndpointRemovesDotGitForBareRepo(t *testing.T) {
+	// Windows will add a drive letter to the paths below since we
+	// canonicalize them.
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	path, err := ioutil.TempDir("", "lfsRepo")
+	assert.Nil(t, err)
+	path = path + "/local/path"
+	err = os.MkdirAll(path, 0755)
+	assert.Nil(t, err)
+
+	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
+		"remote.origin.url": path + "/.git",
+	}))
+	e := finder.Endpoint("download", "")
+	assert.Equal(t, "file://"+path, e.Url)
+
+	os.RemoveAll(path)
 }
 
 func TestAccessConfig(t *testing.T) {
@@ -414,10 +477,10 @@ func TestSetAccess(t *testing.T) {
 	assert.Equal(t, creds.NoneAccess, access.Mode())
 	assert.Equal(t, url, access.URL())
 
-	finder.SetAccess(access.Upgrade(creds.NTLMAccess))
+	finder.SetAccess(access.Upgrade(creds.NegotiateAccess))
 
 	newAccess := finder.AccessFor(url)
-	assert.Equal(t, creds.NTLMAccess, newAccess.Mode())
+	assert.Equal(t, creds.NegotiateAccess, newAccess.Mode())
 	assert.Equal(t, url, newAccess.URL())
 }
 
@@ -431,10 +494,10 @@ func TestChangeAccess(t *testing.T) {
 	assert.Equal(t, creds.BasicAccess, access.Mode())
 	assert.Equal(t, url, access.URL())
 
-	finder.SetAccess(access.Upgrade(creds.NTLMAccess))
+	finder.SetAccess(access.Upgrade(creds.NegotiateAccess))
 
 	newAccess := finder.AccessFor(url)
-	assert.Equal(t, creds.NTLMAccess, newAccess.Mode())
+	assert.Equal(t, creds.NegotiateAccess, newAccess.Mode())
 	assert.Equal(t, url, newAccess.URL())
 }
 
@@ -494,61 +557,73 @@ func TestEndpointParsing(t *testing.T) {
 		"simple bare ssh": {
 			"git@github.com:git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "https://github.com/git-lfs/git-lfs.git",
-				SshUserAndHost: "git@github.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "",
+				Url: "https://github.com/git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "git@github.com",
+					Path:        "git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "",
 			},
 		},
 		"port bare ssh": {
-			"[git@ssh.github.com:443]:git-lfs/git-lfs.git",
+			"[git@lfshttp.github.com:443]:git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "https://ssh.github.com/git-lfs/git-lfs.git",
-				SshUserAndHost: "git@ssh.github.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "443",
-				Operation:      "",
+				Url: "https://lfshttp.github.com/git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "git@lfshttp.github.com",
+					Path:        "git-lfs/git-lfs.git",
+					Port:        "443",
+				},
+				Operation: "",
 			},
 		},
 		"no user bare ssh": {
 			"github.com:git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "https://github.com/git-lfs/git-lfs.git",
-				SshUserAndHost: "github.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "",
+				Url: "https://github.com/git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "github.com",
+					Path:        "git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "",
 			},
 		},
 		"bare word bare ssh": {
 			"github:git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "https://github/git-lfs/git-lfs.git",
-				SshUserAndHost: "github",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "",
+				Url: "https://github/git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "github",
+					Path:        "git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "",
 			},
 		},
 		"insteadof alias": {
 			"gh:git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "https://github.com/git-lfs/git-lfs.git",
-				SshUserAndHost: "",
-				SshPath:        "",
-				SshPort:        "",
-				Operation:      "",
+				Url: "https://github.com/git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "",
+					Path:        "",
+					Port:        "",
+				},
+				Operation: "",
 			},
 		},
 		"remote helper": {
 			"remote::git-lfs/git-lfs.git",
 			lfshttp.Endpoint{
-				Url:            "remote::git-lfs/git-lfs.git",
-				SshUserAndHost: "",
-				SshPath:        "",
-				SshPort:        "",
-				Operation:      "",
+				Url: "remote::git-lfs/git-lfs.git",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "",
+					Path:        "",
+					Port:        "",
+				},
+				Operation: "",
 			},
 		},
 	} {
@@ -581,44 +656,52 @@ func TestInsteadOf(t *testing.T) {
 			"ex:git-lfs/git-lfs.git",
 			"download",
 			lfshttp.Endpoint{
-				Url:            "https://example.com/git-lfs/git-lfs.git/info/lfs",
-				SshUserAndHost: "",
-				SshPath:        "",
-				SshPort:        "",
-				Operation:      "download",
+				Url: "https://example.com/git-lfs/git-lfs.git/info/lfs",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "",
+					Path:        "",
+					Port:        "",
+				},
+				Operation: "download",
 			},
 		},
 		"pushinsteadof alias (upload)": {
 			"ex:git-lfs/git-lfs.git",
 			"upload",
 			lfshttp.Endpoint{
-				Url:            "https://example.com/git-lfs/git-lfs.git/info/lfs",
-				SshUserAndHost: "example.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "upload",
+				Url: "https://example.com/git-lfs/git-lfs.git/info/lfs",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "example.com",
+					Path:        "/git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "upload",
 			},
 		},
 		"exp alias (download)": {
 			"exp:git-lfs/git-lfs.git",
 			"download",
 			lfshttp.Endpoint{
-				Url:            "https://example.com/git-lfs/git-lfs.git/info/lfs",
-				SshUserAndHost: "example.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "download",
+				Url: "https://example.com/git-lfs/git-lfs.git/info/lfs",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "example.com",
+					Path:        "/git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "download",
 			},
 		},
 		"exp alias (upload)": {
 			"exp:git-lfs/git-lfs.git",
 			"upload",
 			lfshttp.Endpoint{
-				Url:            "https://example.com/git-lfs/git-lfs.git/info/lfs",
-				SshUserAndHost: "example.com",
-				SshPath:        "git-lfs/git-lfs.git",
-				SshPort:        "",
-				Operation:      "upload",
+				Url: "https://example.com/git-lfs/git-lfs.git/info/lfs",
+				SSHMetadata: ssh.SSHMetadata{
+					UserAndHost: "example.com",
+					Path:        "/git-lfs/git-lfs.git",
+					Port:        "",
+				},
+				Operation: "upload",
 			},
 		},
 	} {

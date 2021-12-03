@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 type cleanedAsset struct {
@@ -80,7 +80,7 @@ func (f *GitFilter) copyToTemp(reader io.Reader, fileSize int64, cb tools.CopyCa
 	n, rerr := buf.Read(by)
 	by = by[:n]
 
-	if rerr != nil || (err == nil && len(by) < 512) {
+	if rerr != nil || (err == nil && len(by) < blobSizeCutoff) {
 		err = errors.NewCleanPointerError(ptr, by)
 		return
 	}

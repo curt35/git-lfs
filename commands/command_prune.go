@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/fs"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/tasklog"
-	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tools/humanize"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/fs"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/tasklog"
+	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tools/humanize"
+	"github.com/git-lfs/git-lfs/v3/tq"
 	"github.com/rubyist/tracerx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -26,6 +26,8 @@ var (
 	pruneDryRunArg      bool
 	pruneVerboseArg     bool
 	pruneVerifyArg      bool
+	pruneRecentArg      bool
+	pruneForceArg       bool
 	pruneDoNotVerifyArg bool
 )
 
@@ -38,6 +40,8 @@ func pruneCommand(cmd *cobra.Command, args []string) {
 	fetchPruneConfig := lfs.NewFetchPruneConfig(cfg.Git)
 	verify := !pruneDoNotVerifyArg &&
 		(fetchPruneConfig.PruneVerifyRemoteAlways || pruneVerifyArg)
+	fetchPruneConfig.PruneRecent = pruneRecentArg || pruneForceArg
+	fetchPruneConfig.PruneForce = pruneForceArg
 	prune(fetchPruneConfig, verify, pruneDryRunArg, pruneVerboseArg)
 }
 
@@ -71,9 +75,9 @@ func prune(fetchPruneConfig lfs.FetchPruneConfig, verifyRemote, dryRun, verbose 
 	// Add all the base funcs to the waitgroup before starting them, in case
 	// one completes really fast & hits 0 unexpectedly
 	// each main process can Add() to the wg itself if it subdivides the task
-	taskwait.Add(4) // 1..4: localObjects, current & recent refs, unpushed, worktree
+	taskwait.Add(5) // 1..5: localObjects, current & recent refs, unpushed, worktree, stashes
 	if verifyRemote {
-		taskwait.Add(1) // 5
+		taskwait.Add(1) // 6
 	}
 
 	progressChan := make(PruneProgressChan, 100)
@@ -92,13 +96,14 @@ func prune(fetchPruneConfig lfs.FetchPruneConfig, verifyRemote, dryRun, verbose 
 	retainChan := make(chan string, 100)
 
 	gitscanner := lfs.NewGitScanner(cfg, nil)
-	gitscanner.Filter = filepathfilter.New(nil, cfg.FetchExcludePaths())
+	gitscanner.Filter = filepathfilter.New(nil, cfg.FetchExcludePaths(), filepathfilter.GitAttributes)
 
 	sem := semaphore.NewWeighted(int64(runtime.NumCPU() * 2))
 
 	go pruneTaskGetRetainedCurrentAndRecentRefs(gitscanner, fetchPruneConfig, retainChan, errorChan, &taskwait, sem)
 	go pruneTaskGetRetainedUnpushed(gitscanner, fetchPruneConfig, retainChan, errorChan, &taskwait, sem)
-	go pruneTaskGetRetainedWorktree(gitscanner, retainChan, errorChan, &taskwait, sem)
+	go pruneTaskGetRetainedWorktree(gitscanner, fetchPruneConfig, retainChan, errorChan, &taskwait, sem)
+	go pruneTaskGetRetainedStashed(gitscanner, retainChan, errorChan, &taskwait, sem)
 	if verifyRemote {
 		reachableObjects = tools.NewStringSetWithCapacity(100)
 		go pruneTaskGetReachableObjects(gitscanner, &reachableObjects, errorChan, &taskwait, sem)
@@ -302,6 +307,9 @@ func pruneDeleteFiles(prunableObjects []string, logger *tasklog.Logger) {
 			problems.WriteString(fmt.Sprintf("Unable to find media path for %v: %v\n", oid, err))
 			continue
 		}
+		if mediaFile == os.DevNull {
+			continue
+		}
 		err = os.Remove(mediaFile)
 		if err != nil {
 			problems.WriteString(fmt.Sprintf("Failed to remove file %v: %v\n", mediaFile, err))
@@ -386,11 +394,13 @@ func pruneTaskGetRetainedCurrentAndRecentRefs(gitscanner *lfs.GitScanner, fetchc
 		return
 	}
 	commits.Add(ref.Sha)
-	waitg.Add(1)
-	go pruneTaskGetRetainedAtRef(gitscanner, ref.Sha, retainChan, errorChan, waitg, sem)
+	if !fetchconf.PruneForce {
+		waitg.Add(1)
+		go pruneTaskGetRetainedAtRef(gitscanner, ref.Sha, retainChan, errorChan, waitg, sem)
+	}
 
 	// Now recent
-	if fetchconf.FetchRecentRefsDays > 0 {
+	if !fetchconf.PruneRecent && fetchconf.FetchRecentRefsDays > 0 {
 		pruneRefDays := fetchconf.FetchRecentRefsDays + fetchconf.PruneOffsetDays
 		tracerx.Printf("PRUNE: Retaining non-HEAD refs within %d (%d+%d) days", pruneRefDays, fetchconf.FetchRecentRefsDays, fetchconf.PruneOffsetDays)
 		refsSince := time.Now().AddDate(0, 0, -pruneRefDays)
@@ -410,7 +420,7 @@ func pruneTaskGetRetainedCurrentAndRecentRefs(gitscanner *lfs.GitScanner, fetchc
 
 	// For every unique commit we've fetched, check recent commits too
 	// Only if we're fetching recent commits, otherwise only keep at refs
-	if fetchconf.FetchRecentCommitsDays > 0 {
+	if !fetchconf.PruneRecent && fetchconf.FetchRecentCommitsDays > 0 {
 		pruneCommitDays := fetchconf.FetchRecentCommitsDays + fetchconf.PruneOffsetDays
 		for commit := range commits.Iter() {
 			// We measure from the last commit at the ref
@@ -446,8 +456,12 @@ func pruneTaskGetRetainedUnpushed(gitscanner *lfs.GitScanner, fetchconf lfs.Fetc
 }
 
 // Background task, must call waitg.Done() once at end
-func pruneTaskGetRetainedWorktree(gitscanner *lfs.GitScanner, retainChan chan string, errorChan chan error, waitg *sync.WaitGroup, sem *semaphore.Weighted) {
+func pruneTaskGetRetainedWorktree(gitscanner *lfs.GitScanner, fetchconf lfs.FetchPruneConfig, retainChan chan string, errorChan chan error, waitg *sync.WaitGroup, sem *semaphore.Weighted) {
 	defer waitg.Done()
+
+	if fetchconf.PruneForce {
+		return
+	}
 
 	// Retain other worktree HEADs too
 	// Working copy, branch & maybe commit is different but repo is shared
@@ -477,6 +491,25 @@ func pruneTaskGetRetainedWorktree(gitscanner *lfs.GitScanner, retainChan chan st
 }
 
 // Background task, must call waitg.Done() once at end
+func pruneTaskGetRetainedStashed(gitscanner *lfs.GitScanner, retainChan chan string, errorChan chan error, waitg *sync.WaitGroup, sem *semaphore.Weighted) {
+	defer waitg.Done()
+
+	err := gitscanner.ScanStashed(func(p *lfs.WrappedPointer, err error) {
+		if err != nil {
+			errorChan <- err
+		} else {
+			retainChan <- p.Pointer.Oid
+			tracerx.Printf("RETAIN: %v stashed", p.Pointer.Oid)
+		}
+	})
+
+	if err != nil {
+		errorChan <- err
+		return
+	}
+}
+
+// Background task, must call waitg.Done() once at end
 func pruneTaskGetReachableObjects(gitscanner *lfs.GitScanner, outObjectSet *tools.StringSet, errorChan chan error, waitg *sync.WaitGroup, sem *semaphore.Weighted) {
 	defer waitg.Done()
 
@@ -500,6 +533,8 @@ func init() {
 	RegisterCommand("prune", pruneCommand, func(cmd *cobra.Command) {
 		cmd.Flags().BoolVarP(&pruneDryRunArg, "dry-run", "d", false, "Don't delete anything, just report")
 		cmd.Flags().BoolVarP(&pruneVerboseArg, "verbose", "v", false, "Print full details of what is/would be deleted")
+		cmd.Flags().BoolVarP(&pruneRecentArg, "recent", "", false, "Prune even recent objects")
+		cmd.Flags().BoolVarP(&pruneForceArg, "force", "f", false, "Prune everything that has been pushed")
 		cmd.Flags().BoolVarP(&pruneVerifyArg, "verify-remote", "c", false, "Verify that remote has LFS files before deleting")
 		cmd.Flags().BoolVar(&pruneDoNotVerifyArg, "no-verify-remote", false, "Override lfs.pruneverifyremotealways and don't verify")
 	})

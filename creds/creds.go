@@ -9,8 +9,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/rubyist/tracerx"
 )
 
@@ -84,9 +86,13 @@ func NewCredentialHelperContext(gitEnv config.Environment, osEnv config.Environm
 	if !ok {
 		askpass, _ = osEnv.Get("SSH_ASKPASS")
 	}
-	if len(askpass) > 0 {
+	askpassfile, err := tools.TranslateCygwinPath(askpass)
+	if err != nil {
+		tracerx.Printf("Error reading askpass helper %q: %v", askpassfile, err)
+	}
+	if len(askpassfile) > 0 {
 		c.askpassCredHelper = &AskPassCredentialHelper{
-			Program: askpass,
+			Program: askpassfile,
 		}
 	}
 
@@ -232,7 +238,7 @@ func (a *AskPassCredentialHelper) getFromProgram(valueType credValueType, u *url
 
 	// 'cmd' will run the GIT_ASKPASS (or core.askpass) command prompting
 	// for the desired valueType (`Username` or `Password`)
-	cmd := exec.Command(a.Program, a.args(fmt.Sprintf("%s for %q", valueString, u))...)
+	cmd := subprocess.ExecCommand(a.Program, a.args(fmt.Sprintf("%s for %q", valueString, u))...)
 	cmd.Stderr = &err
 	cmd.Stdout = &value
 
@@ -292,7 +298,7 @@ func (h *commandCredentialHelper) Approve(creds Creds) error {
 
 func (h *commandCredentialHelper) exec(subcommand string, input Creds) (Creds, error) {
 	output := new(bytes.Buffer)
-	cmd := exec.Command("git", "credential", subcommand)
+	cmd := subprocess.ExecCommand("git", "credential", subcommand)
 	cmd.Stdin = bufferCreds(input)
 	cmd.Stdout = output
 	/*

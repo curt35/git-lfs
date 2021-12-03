@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/git/gitattr"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/filepathfilter"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/git/gitattr"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 // GetLockablePatterns returns a list of patterns in .gitattributes which are
@@ -44,10 +44,10 @@ func (c *Client) refreshLockablePatterns() {
 	c.lockablePatterns = make([]string, 0, len(paths))
 	for _, p := range paths {
 		if p.Lockable {
-			c.lockablePatterns = append(c.lockablePatterns, p.Path)
+			c.lockablePatterns = append(c.lockablePatterns, filepath.ToSlash(p.Path))
 		}
 	}
-	c.lockableFilter = filepathfilter.New(c.lockablePatterns, nil)
+	c.lockableFilter = filepathfilter.New(c.lockablePatterns, nil, filepathfilter.GitAttributes, filepathfilter.DefaultValue(false))
 }
 
 // IsFileLockable returns whether a specific file path is marked as Lockable,
@@ -100,10 +100,10 @@ func (c *Client) FixFileWriteFlagsInDir(dir string, lockablePatterns, unlockable
 	var lockableFilter *filepathfilter.Filter
 	var unlockableFilter *filepathfilter.Filter
 	if lockablePatterns != nil {
-		lockableFilter = filepathfilter.New(lockablePatterns, nil)
+		lockableFilter = filepathfilter.New(lockablePatterns, nil, filepathfilter.GitAttributes)
 	}
 	if unlockablePatterns != nil {
-		unlockableFilter = filepathfilter.New(unlockablePatterns, nil)
+		unlockableFilter = filepathfilter.New(unlockablePatterns, nil, filepathfilter.GitAttributes)
 	}
 
 	return c.fixFileWriteFlags(absPath, c.LocalWorkingDir, lockableFilter, unlockableFilter)

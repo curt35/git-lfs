@@ -1,4 +1,5 @@
-// +build darwin,cgo
+//go:build darwin
+// +build darwin
 
 package tools
 
@@ -9,18 +10,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unsafe"
 
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/errors"
 	"golang.org/x/sys/unix"
 )
-
-/*
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/clonefile.h>
-*/
-import "C"
 
 var cloneFileSupported bool
 
@@ -112,30 +105,11 @@ func CloneFileByPath(dst, src string) (bool, error) {
 }
 
 func cloneFileSyscall(dst, src string) *CloneFileError {
-	srcCString, err := unix.BytePtrFromString(src)
+	err := unix.Clonefileat(unix.AT_FDCWD, src, unix.AT_FDCWD, dst, unix.CLONE_NOFOLLOW)
 	if err != nil {
-		return &CloneFileError{errorString: err.Error()}
-	}
-	dstCString, err := unix.BytePtrFromString(dst)
-	if err != nil {
-		return &CloneFileError{errorString: err.Error()}
-	}
-
-	atFDCwd := C.AT_FDCWD // current directory.
-
-	_, _, errNo := unix.Syscall6(
-		unix.SYS_CLONEFILEAT,
-		uintptr(atFDCwd),
-		uintptr(unsafe.Pointer(srcCString)),
-		uintptr(atFDCwd),
-		uintptr(unsafe.Pointer(dstCString)),
-		uintptr(C.CLONE_NOFOLLOW),
-		0,
-	)
-	if errNo != 0 {
 		return &CloneFileError{
-			Unsupported: errNo == C.ENOTSUP,
-			errorString: fmt.Sprintf("%s. from %v to %v", unix.ErrnoName(errNo), src, dst),
+			Unsupported: err == unix.ENOTSUP,
+			errorString: fmt.Sprintf("%s. from %v to %v", err, src, dst),
 		}
 	}
 

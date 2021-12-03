@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/fs"
+	"github.com/git-lfs/gitobj/v2"
 )
 
 var (
@@ -22,7 +24,7 @@ var (
 	}
 	latest      = "https://git-lfs.github.com/spec/v1"
 	oidType     = "sha256"
-	oidRE       = regexp.MustCompile(`\A[[:alnum:]]{64}`)
+	oidRE       = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
 	matcherRE   = regexp.MustCompile("git-media|hawser|git-lfs")
 	extRE       = regexp.MustCompile(`\Aext-\d{1}-\w+`)
 	pointerKeys = []string{"version", "oid", "size"}
@@ -34,6 +36,7 @@ type Pointer struct {
 	Size       int64
 	OidType    string
 	Extensions []*PointerExtension
+	Canonical  bool
 }
 
 // A PointerExtension is parsed from the Git LFS Pointer file.
@@ -51,7 +54,7 @@ func (p ByPriority) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 func (p ByPriority) Less(i, j int) bool { return p[i].Priority < p[j].Priority }
 
 func NewPointer(oid string, size int64, exts []*PointerExtension) *Pointer {
-	return &Pointer{latest, oid, size, oidType, exts}
+	return &Pointer{latest, oid, size, oidType, exts, true}
 }
 
 func NewPointerExtension(name string, priority int, oid string) *PointerExtension {
@@ -77,8 +80,20 @@ func (p *Pointer) Encoded() string {
 	return buffer.String()
 }
 
+func EmptyPointer() *Pointer {
+	return NewPointer(fs.EmptyObjectSHA256, 0, nil)
+}
+
 func EncodePointer(writer io.Writer, pointer *Pointer) (int, error) {
 	return writer.Write([]byte(pointer.Encoded()))
+}
+
+func DecodePointerFromBlob(b *gitobj.Blob) (*Pointer, error) {
+	// Check size before reading
+	if b.Size >= blobSizeCutoff {
+		return nil, errors.NewNotAPointerError(errors.New("blob size exceeds lfs pointer size cutoff"))
+	}
+	return DecodePointer(b.Contents)
 }
 
 func DecodePointerFromFile(file string) (*Pointer, error) {
@@ -87,7 +102,7 @@ func DecodePointerFromFile(file string) (*Pointer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if stat.Size() > blobSizeCutoff {
+	if stat.Size() >= blobSizeCutoff {
 		return nil, errors.NewNotAPointerError(errors.New("file size exceeds lfs pointer size cutoff"))
 	}
 	f, err := os.OpenFile(file, os.O_RDONLY, 0644)
@@ -122,7 +137,14 @@ func DecodeFrom(reader io.Reader) (*Pointer, io.Reader, error) {
 		return nil, contents, err
 	}
 
+	if len(buf) == 0 {
+		return EmptyPointer(), contents, nil
+	}
+
 	p, err := decodeKV(bytes.TrimSpace(buf))
+	if err == nil && p != nil {
+		p.Canonical = p.Encoded() == string(buf)
+	}
 	return p, contents, err
 }
 

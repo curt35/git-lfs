@@ -1,3 +1,4 @@
+//go:build testtools
 // +build testtools
 
 package main
@@ -5,6 +6,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -33,8 +35,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/git-lfs/go-ntlm/ntlm"
 )
 
 var (
@@ -59,7 +59,7 @@ var (
 		"status-storage-403", "status-storage-404", "status-storage-410", "status-storage-422", "status-storage-500", "status-storage-503",
 		"status-batch-resume-206", "batch-resume-fail-fallback", "return-expired-action", "return-expired-action-forever", "return-invalid-size",
 		"object-authenticated", "storage-download-retry", "storage-upload-retry", "storage-upload-retry-later", "unknown-oid",
-		"send-verify-action", "send-deprecated-links",
+		"send-verify-action", "send-deprecated-links", "redirect-storage-upload", "storage-compress", "batch-hash-algo-empty", "batch-hash-algo-invalid",
 	}
 
 	reqCookieReposRE = regexp.MustCompile(`\A/require-cookie-`)
@@ -87,13 +87,6 @@ func main() {
 	}
 	serverClientCert.StartTLS()
 
-	ntlmSession, err := ntlm.CreateServerSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
-	if err != nil {
-		fmt.Println("Error creating ntlm session:", err)
-		os.Exit(1)
-	}
-	ntlmSession.SetUserInfo("ntlmuser", "ntlmpass", "NTLMDOMAIN")
-
 	stopch := make(chan bool)
 
 	mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +112,7 @@ func main() {
 		}
 
 		if strings.Contains(r.URL.Path, "/info/lfs") {
-			if !skipIfBadAuth(w, r, id, ntlmSession) {
+			if !skipIfBadAuth(w, r, id) {
 				lfsHandler(w, r, id)
 			}
 
@@ -258,7 +251,10 @@ func lfsHandler(w http.ResponseWriter, r *http.Request, id string) {
 	}
 }
 
-func lfsUrl(repo, oid string) string {
+func lfsUrl(repo, oid string, redirect bool) string {
+	if redirect {
+		return server.URL + "/redirect307/objects/" + oid + "?r=" + repo
+	}
 	return server.URL + "/storage/" + oid + "?r=" + repo
 }
 
@@ -360,8 +356,9 @@ func (r *batchReq) RefName() string {
 }
 
 type batchResp struct {
-	Transfer string      `json:"transfer,omitempty"`
-	Objects  []lfsObject `json:"objects"`
+	Transfer      string      `json:"transfer,omitempty"`
+	Objects       []lfsObject `json:"objects"`
+	HashAlgorithm string      `json:"hash_algo,omitempty"`
 }
 
 func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
@@ -414,6 +411,17 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 		}
 	}
 
+	if strings.HasSuffix(repo, "batch-retry-later") {
+		if timeLeft, isWaiting := checkRateLimit("batch", "", repo, ""); isWaiting {
+			w.Header().Set("Retry-After", strconv.Itoa(timeLeft))
+			w.WriteHeader(http.StatusTooManyRequests)
+
+			w.Write([]byte("rate limit reached"))
+			fmt.Println("Setting header to: ", strconv.Itoa(timeLeft))
+			return
+		}
+	}
+
 	res := []lfsObject{}
 	testingChunked := testingChunkedTransferEncoding(r)
 	testingTus := testingTusUploadInBatchReq(r)
@@ -421,6 +429,7 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 	testingCustomTransfer := testingCustomTransfer(r)
 	var transferChoice string
 	var searchForTransfer string
+	hashAlgo := "sha256"
 	if testingTus {
 		searchForTransfer = "tus"
 	} else if testingCustomTransfer {
@@ -485,13 +494,18 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 				o.Size = -1
 			}
 
+			if handler == "batch-hash-algo-empty" {
+				hashAlgo = ""
+			} else if handler == "batch-hash-algo-invalid" {
+				hashAlgo = "invalid"
+			}
+
 			if handler == "send-deprecated-links" {
 				o.Links = make(map[string]*lfsLink)
 			}
-
 			if addAction {
 				a := &lfsLink{
-					Href:   lfsUrl(repo, obj.Oid),
+					Href:   lfsUrl(repo, obj.Oid, handler == "redirect-storage-upload"),
 					Header: map[string]string{},
 				}
 				a = serveExpired(a, repo, handler)
@@ -531,7 +545,7 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 		res = append(res, o)
 	}
 
-	ores := batchResp{Transfer: transferChoice, Objects: res}
+	ores := batchResp{HashAlgorithm: hashAlgo, Transfer: transferChoice, Objects: res}
 
 	by, err := json.Marshal(ores)
 	if err != nil {
@@ -644,7 +658,6 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
 	repo := r.URL.Query().Get("r")
 	parts := strings.Split(r.URL.Path, "/")
 	oid := parts[len(parts)-1]
@@ -696,6 +709,12 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("Setting header to: ", strconv.Itoa(timeLeft))
 				return
 			}
+		case "storage-compress":
+			if r.Header.Get("Accept-Encoding") != "gzip" {
+				w.WriteHeader(500)
+				w.Write([]byte("not encoded"))
+				return
+			}
 		}
 
 		if testingChunkedTransferEncoding(r) {
@@ -729,6 +748,7 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode := 200
 		byteLimit := 0
 		resumeAt := int64(0)
+		compress := false
 
 		if by, ok := largeObjects.Get(repo, oid); ok {
 			if len(by) == len("storage-download-retry-later") && string(by) == "storage-download-retry-later" {
@@ -742,6 +762,13 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 				if retries, ok := incrementRetriesFor("storage", "download", repo, oid, false); ok && retries < 3 {
 					statusCode = 500
 					by = []byte("malformed content")
+				}
+			} else if len(by) == len("storage-compress") && string(by) == "storage-compress" {
+				if r.Header.Get("Accept-Encoding") != "gzip" {
+					statusCode = 500
+					by = []byte("not encoded")
+				} else {
+					compress = true
 				}
 			} else if len(by) == len("status-batch-resume-206") && string(by) == "status-batch-resume-206" {
 				// Resume if header includes range, otherwise deliberately interrupt
@@ -801,13 +828,21 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			var wrtr io.Writer = w
+			if compress {
+				w.Header().Set("Content-Encoding", "gzip")
+				gz := gzip.NewWriter(w)
+				defer gz.Close()
+
+				wrtr = gz
+			}
 			w.WriteHeader(statusCode)
 			if byteLimit > 0 {
-				w.Write(by[0:byteLimit])
+				wrtr.Write(by[0:byteLimit])
 			} else if resumeAt > 0 {
-				w.Write(by[resumeAt:])
+				wrtr.Write(by[resumeAt:])
 			} else {
-				w.Write(by)
+				wrtr.Write(by)
 			}
 			return
 		}
@@ -975,6 +1010,9 @@ func redirect307Handler(w http.ResponseWriter, r *http.Request) {
 		redirectTo = "/" + strings.Join(parts[3:], "/")
 	} else if parts[2] == "abs" {
 		redirectTo = server.URL + "/" + strings.Join(parts[3:], "/")
+	} else if parts[2] == "objects" {
+		repo := r.URL.Query().Get("r")
+		redirectTo = server.URL + "/storage/" + strings.Join(parts[3:], "/") + "?r=" + repo
 	} else {
 		debug(id, "Invalid URL for redirect: %v", r.URL)
 		w.WriteHeader(404)
@@ -1544,12 +1582,8 @@ func skipIfNoCookie(w http.ResponseWriter, r *http.Request, id string) bool {
 	return true
 }
 
-func skipIfBadAuth(w http.ResponseWriter, r *http.Request, id string, ntlmSession ntlm.ServerSession) bool {
+func skipIfBadAuth(w http.ResponseWriter, r *http.Request, id string) bool {
 	auth := r.Header.Get("Authorization")
-	if strings.Contains(r.URL.Path, "ntlm") {
-		return false
-	}
-
 	if auth == "" {
 		w.WriteHeader(401)
 		return true
@@ -1579,49 +1613,6 @@ func skipIfBadAuth(w http.ResponseWriter, r *http.Request, id string, ntlmSessio
 	w.WriteHeader(403)
 	debug(id, "Bad auth: %q", auth)
 	return true
-}
-
-func handleNTLM(w http.ResponseWriter, r *http.Request, authHeader string, session ntlm.ServerSession) {
-	if strings.HasPrefix(strings.ToUpper(authHeader), "BASIC ") {
-		authHeader = ""
-	}
-
-	switch authHeader {
-	case "":
-		w.Header().Set("Www-Authenticate", "ntlm")
-		w.WriteHeader(401)
-
-	// ntlmNegotiateMessage from httputil pkg
-	case "NTLM TlRMTVNTUAABAAAAB7IIogwADAAzAAAACwALACgAAAAKAAAoAAAAD1dJTExISS1NQUlOTk9SVEhBTUVSSUNB":
-		ch, err := session.GenerateChallengeMessage()
-		if err != nil {
-			writeLFSError(w, 500, err.Error())
-			return
-		}
-
-		chMsg := base64.StdEncoding.EncodeToString(ch.Bytes())
-		w.Header().Set("Www-Authenticate", "ntlm "+chMsg)
-		w.WriteHeader(401)
-
-	default:
-		if !strings.HasPrefix(strings.ToUpper(authHeader), "NTLM ") {
-			writeLFSError(w, 500, "bad authorization header: "+authHeader)
-			return
-		}
-
-		auth := authHeader[5:] // strip "ntlm " prefix
-		val, err := base64.StdEncoding.DecodeString(auth)
-		if err != nil {
-			writeLFSError(w, 500, "base64 decode error: "+err.Error())
-			return
-		}
-
-		_, err = ntlm.ParseAuthenticateMessage(val, 2)
-		if err != nil {
-			writeLFSError(w, 500, "auth parse error: "+err.Error())
-			return
-		}
-	}
 }
 
 func init() {

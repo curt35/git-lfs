@@ -2,20 +2,28 @@
 
 . "$(dirname "$0")/testlib.sh"
 
+setup_repo () {
+  setup_remote_repo_with_file "$1" "$2"
+
+  git lfs track --lockable "*.dat"
+  git add -u
+  git commit -m 'Mark files lockable'
+}
+
 begin_test "unlocking a lock by path with good ref"
 (
   set -e
 
-  reponame="unlock-by-path-master-branch-required"
-  setup_remote_repo_with_file "$reponame" "c.dat"
+  reponame="unlock-by-path-main-branch-required"
+  setup_repo "$reponame" "c.dat"
 
   git lfs lock --json "c.dat" | tee lock.log
 
   id=$(assert_lock lock.log c.dat)
-  assert_server_lock "$reponame" "$id" "refs/heads/master"
+  assert_server_lock "$reponame" "$id" "refs/heads/main"
 
   git lfs unlock --id="$id"
-  refute_server_lock "$reponame" "$id" "refs/heads/master"
+  refute_server_lock "$reponame" "$id" "refs/heads/main"
 )
 end_test
 
@@ -33,8 +41,9 @@ begin_test "unlocking a lock by path with tracked ref"
   git commit -m "add c.dat"
 
   git config push.default upstream
-  git config branch.master.merge refs/heads/tracked
-  git push origin master
+  git config branch.main.merge refs/heads/tracked
+  git config branch.main.remote origin
+  git push origin main
 
   git lfs lock --json "c.dat" | tee lock.log
 
@@ -58,7 +67,7 @@ begin_test "unlocking a lock by path with bad ref"
   echo "c" > c.dat
   git add .gitattributes c.dat
   git commit -m "add c.dat"
-  git push origin master:other
+  git push origin main:other
 
   git checkout -b other
   git lfs lock --json "c.dat" | tee lock.log
@@ -66,7 +75,7 @@ begin_test "unlocking a lock by path with bad ref"
   id=$(assert_lock lock.log c.dat)
   assert_server_lock "$reponame" "$id" "refs/heads/other"
 
-  git checkout master
+  git checkout main
   git lfs unlock --id="$id" 2>&1 | tee unlock.log
   if [ "0" -eq "${PIPESTATUS[0]}" ]; then
     echo >&2 "fatal: expected 'git lfs lock \'a.dat\'' to fail"
@@ -74,7 +83,7 @@ begin_test "unlocking a lock by path with bad ref"
   fi
 
   assert_server_lock "$reponame" "$id" "refs/heads/other"
-  grep 'Expected ref "refs/heads/other", got "refs/heads/master"' unlock.log
+  grep 'Expected ref "refs/heads/other", got "refs/heads/main"' unlock.log
 )
 end_test
 
@@ -90,7 +99,7 @@ begin_test "unlocking a lock by id with bad ref"
   echo "c" > c.dat
   git add .gitattributes c.dat
   git commit -m "add c.dat"
-  git push origin master:other
+  git push origin main:other
 
   git checkout -b other
   git lfs lock --json "c.dat" | tee lock.log
@@ -98,7 +107,7 @@ begin_test "unlocking a lock by id with bad ref"
   id=$(assert_lock lock.log c.dat)
   assert_server_lock "$reponame" "$id" "refs/heads/other"
 
-  git checkout master
+  git checkout main
   git lfs unlock --id="$id" 2>&1 | tee unlock.log
   if [ "0" -eq "${PIPESTATUS[0]}" ]; then
     echo >&2 "fatal: expected 'git lfs lock \'a.dat\'' to fail"
@@ -106,7 +115,52 @@ begin_test "unlocking a lock by id with bad ref"
   fi
 
   assert_server_lock "$reponame" "$id" "refs/heads/other"
-  grep 'Expected ref "refs/heads/other", got "refs/heads/master"' unlock.log
+  grep 'Expected ref "refs/heads/other", got "refs/heads/main"' unlock.log
+)
+end_test
+
+begin_test "unlock multiple files"
+(
+  set -e
+
+  reponame="unlock-multiple-files"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  echo "a" > a.dat
+  echo "b" > b.dat
+  git add .gitattributes a.dat b.dat
+  git commit -m "add dat files"
+  git push origin main:other
+
+  git lfs lock a.dat
+  git lfs lock b.dat
+  git lfs unlock *.dat >log 2>&1
+  grep "Usage:" log && exit 1
+  true
+)
+end_test
+
+begin_test "unlock multiple files (JSON)"
+(
+  set -e
+
+  reponame="unlock-multiple-files-json"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  echo "a" > a.dat
+  echo "b" > b.dat
+  git add .gitattributes a.dat b.dat
+  git commit -m "add dat files"
+  git push origin main:other
+
+  git lfs lock a.dat
+  git lfs lock b.dat
+  git lfs unlock --json *.dat | tee lock.json
+  grep -F '[{"path":"a.dat","unlocked":true},{"path":"b.dat","unlocked":true}]' lock.json
 )
 end_test
 
@@ -115,7 +169,7 @@ begin_test "unlocking a file makes it readonly"
   set -e
 
   reponame="unlock_set_readonly"
-  setup_remote_repo_with_file "$reponame" "c.dat"
+  setup_repo "$reponame" "c.dat"
 
   git lfs lock --json "c.dat"
   assert_file_writeable c.dat
@@ -130,7 +184,7 @@ begin_test "unlocking a file ignores readonly"
   set -e
 
   reponame="unlock_set_readonly_ignore"
-  setup_remote_repo_with_file "$reponame" "c.dat"
+  setup_repo "$reponame" "c.dat"
 
   git lfs lock --json "c.dat"
   assert_file_writeable c.dat
@@ -140,12 +194,12 @@ begin_test "unlocking a file ignores readonly"
 )
 end_test
 
-begin_test "force unlocking lock with missing file"
+begin_test "unlocking lock removed file"
 (
   set -e
 
-  reponame="force-unlock-missing-file"
-  setup_remote_repo_with_file "$reponame" "a.dat"
+  reponame="unlock-removed-file"
+  setup_repo "$reponame" "a.dat"
 
   git lfs lock --json "a.dat" | tee lock.log
   id=$(assert_lock lock.log a.dat)
@@ -156,13 +210,64 @@ begin_test "force unlocking lock with missing file"
   rm *.log *.json # ensure clean git status
   git status
 
-  git lfs unlock "a.dat" 2>&1 | tee unlock.log
-  grep "Unable to determine path" unlock.log
-  assert_server_lock "$reponame" "$id"
-
-  rm unlock.log
   git lfs unlock --force "a.dat" 2>&1 | tee unlock.log
   refute_server_lock "$reponame" "$id"
+)
+end_test
+
+begin_test "unlocking nonexistent file"
+(
+  set -e
+
+  reponame="unlock-nonexistent-file"
+  setup_repo "$reponame" "a.dat"
+
+  git lfs lock --json "b.dat" | tee lock.log
+  id=$(assert_lock lock.log b.dat)
+  assert_server_lock "$reponame" "$id"
+
+  git lfs unlock --force "b.dat" 2>&1 | tee unlock.log
+  refute_server_lock "$reponame" "$id"
+)
+end_test
+
+begin_test "unlocking unlockable file"
+(
+  set -e
+
+  reponame="unlock-unlockable-file"
+  # Try with lockable patterns.
+  setup_repo "$reponame" "a.dat"
+
+  touch README.md
+  git add README.md
+  git commit -m 'Add README'
+
+  git lfs lock --json "README.md" | tee lock.log
+  id=$(assert_lock lock.log README.md)
+  assert_server_lock "$reponame" "$id"
+  assert_file_writeable "README.md"
+
+  git lfs unlock --force "README.md" 2>&1 | tee unlock.log
+  refute_server_lock "$reponame" "$id"
+  assert_file_writeable "README.md"
+
+  cd "$TRASHDIR"
+  # Try without any lockable patterns.
+  setup_remote_repo_with_file "$reponame-2" "a.dat"
+
+  touch README.md
+  git add README.md
+  git commit -m 'Add README'
+
+  git lfs lock --json "README.md" | tee lock.log
+  id=$(assert_lock lock.log README.md)
+  assert_server_lock "$reponame-2" "$id"
+  assert_file_writeable "README.md"
+
+  git lfs unlock --force "README.md" 2>&1 | tee unlock.log
+  refute_server_lock "$reponame-2" "$id"
+  assert_file_writeable "README.md"
 )
 end_test
 
@@ -171,7 +276,7 @@ begin_test "unlocking a lock (--json)"
   set -e
 
   reponame="unlock_by_path_json"
-  setup_remote_repo_with_file "$reponame" "c_json.dat"
+  setup_repo "$reponame" "c_json.dat"
 
   git lfs lock --json "c_json.dat" | tee lock.log
 
@@ -190,7 +295,7 @@ begin_test "unlocking a lock by id"
   set -e
 
   reponame="unlock_by_id"
-  setup_remote_repo_with_file "$reponame" "d.dat"
+  setup_repo "$reponame" "d.dat"
 
   git lfs lock --json "d.dat" | tee lock.log
   assert_file_writeable d.dat
@@ -208,7 +313,7 @@ begin_test "unlocking a lock without sufficient info"
   set -e
 
   reponame="unlock_ambiguous"
-  setup_remote_repo_with_file "$reponame" "e.dat"
+  setup_repo "$reponame" "e.dat"
 
   git lfs lock --json "e.dat" | tee lock.log
 
@@ -226,7 +331,7 @@ begin_test "unlocking a lock while uncommitted"
   set -e
 
   reponame="unlock_modified"
-  setup_remote_repo_with_file "$reponame" "mod.dat"
+  setup_repo "$reponame" "mod.dat"
 
   git lfs lock --json "mod.dat" | tee lock.log
 
@@ -254,7 +359,7 @@ begin_test "unlocking a lock with ambiguious arguments"
   set -e
 
   reponame="unlock_ambiguious_args"
-  setup_remote_repo_with_file "$reponame" "a.dat"
+  setup_repo "$reponame" "a.dat"
 
   git lfs lock --json "a.dat" | tee lock.log
 
@@ -277,7 +382,7 @@ begin_test "unlocking a lock while uncommitted with --force"
   set -e
 
   reponame="unlock_modified_force"
-  setup_remote_repo_with_file "$reponame" "modforce.dat"
+  setup_repo "$reponame" "modforce.dat"
 
   git lfs lock --json "modforce.dat" | tee lock.log
 
@@ -298,7 +403,7 @@ begin_test "unlocking a lock while untracked"
   set -e
 
   reponame="unlock_untracked"
-  setup_remote_repo_with_file "$reponame" "notrelevant.dat"
+  setup_repo "$reponame" "notrelevant.dat"
 
   git lfs track "*.dat"
   # Create file but don't add it to git
@@ -321,5 +426,28 @@ begin_test "unlocking a lock while untracked"
   git commit -m "Added untracked"
   git lfs unlock "untracked.dat" 2>&1 | tee unlock.log
   refute_server_lock "$reponame" "$id"
+)
+end_test
+
+begin_test "unlock with git-lfs-transfer"
+(
+  set -e
+
+  setup_pure_ssh
+
+  reponame="unlock-git-lfs-transfer"
+  setup_remote_repo_with_file "$reponame" "f.dat"
+  clone_repo "$reponame" "$reponame"
+
+  sshurl=$(ssh_remote "$reponame")
+  git config lfs.url "$sshurl"
+
+  GIT_TRACE_PACKET=1 git lfs lock --json "f.dat" | tee lock.log
+
+  id=$(assert_lock lock.log f.dat)
+  assert_server_lock_ssh "$reponame" "$id" "refs/heads/main"
+
+  git lfs unlock --id "$id"
+  refute_server_lock_ssh "$reponame" "$id" "refs/heads/main"
 )
 end_test

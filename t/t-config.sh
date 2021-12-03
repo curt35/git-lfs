@@ -42,6 +42,80 @@ begin_test "default config"
 )
 end_test
 
+begin_test "config reads from repository"
+(
+  set -e
+  reponame="repository-config"
+  setup_remote_repo "$reponame"
+  mkdir $reponame
+  cd $reponame
+  git init
+  git remote add origin "$GITSERVER/$reponame"
+  git lfs env | tee env.log
+  grep "Endpoint=$GITSERVER/$reponame.git/info/lfs (auth=none)" env.log
+
+  git config --file=.lfsconfig lfs.url http://lfsconfig-file
+  git config --file=.lfsconfig lfs.http://lfsconfig-file.access lfsconfig
+  git add .lfsconfig
+  git commit -m 'Add file'
+  git push origin HEAD
+
+  git checkout -b side
+  git config --file=.lfsconfig lfs.url http://lfsconfig-file-side
+  git config --file=.lfsconfig lfs.http://lfsconfig-file-side.access lfsconfig
+  git add .lfsconfig
+  git commit -m 'Add file for side'
+  git push origin HEAD
+
+  mkdir "../$reponame-2"
+  cd "../$reponame-2"
+  git init
+  git remote add origin "$GITSERVER/$reponame"
+
+  git lfs env | tee env.log
+  grep "Endpoint=$GITSERVER/$reponame.git/info/lfs (auth=none)" env.log
+
+  git fetch origin
+  git symbolic-ref HEAD refs/remotes/origin/side
+  git show "HEAD:.lfsconfig"
+  git lfs env | tee env.log
+  grep "Endpoint=http://lfsconfig-file-side (auth=lfsconfig)" env.log
+
+  git read-tree refs/remotes/origin/main
+  git lfs env | tee env.log
+  grep "Endpoint=http://lfsconfig-file (auth=lfsconfig)" env.log
+)
+end_test
+
+begin_test "can read LFS file with name before .lfsconfig"
+(
+  set -e
+  reponame="early-file-config"
+  setup_remote_repo "$reponame"
+  mkdir $reponame
+  cd $reponame
+  git init
+  git remote add origin "$GITSERVER/$reponame"
+
+  git lfs track "*.bin"
+  git config --file=.lfsconfig lfs.url "$GITSERVER/$reponame.git/info/lfs"
+
+  echo "abc" > .bin
+  echo "def" > a.bin
+
+  git add .
+  git commit -m "Add files"
+  git push origin HEAD
+  rm -fr .git/lfs/objects
+
+  cd ..
+  git clone "$reponame" "$reponame-2"
+  cd "$reponame-2"
+  grep abc .bin
+  grep def a.bin
+)
+end_test
+
 begin_test "extension config"
 (
   set -e
@@ -180,5 +254,25 @@ begin_test "config: ignoring unsafe lfsconfig keys"
 
   grep "WARNING: These unsafe lfsconfig keys were ignored:" status.log
   grep "  core.askpass" status.log
+)
+end_test
+
+begin_test "config respects include.* directives when GIT_CONFIG is set"
+(
+  set -e
+
+  mkdir include-directives
+  cd include-directives
+
+  git init
+
+  git config lfs.url "http://some-url/rest"
+  GIT_CONFIG="$(pwd)/.git/config" git lfs env | tee env.log
+  grep "Endpoint=http://some-url/rest (auth=none)" env.log
+
+  git config --file ./.git/b.config url."http://other-url/".insteadOf "http://some-url/"
+  git config include.path "$(pwd)/.git/b.config"
+  GIT_CONFIG="$(pwd)/.git/config" git lfs env | tee env.log
+  grep "Endpoint=http://other-url/rest (auth=none)" env.log
 )
 end_test

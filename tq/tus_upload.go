@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/lfsapi"
-	"github.com/git-lfs/git-lfs/tools"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/lfsapi"
+	"github.com/git-lfs/git-lfs/v3/tools"
 )
 
 const (
@@ -21,11 +21,6 @@ const (
 // Adapter for tus.io protocol resumaable uploads
 type tusUploadAdapter struct {
 	*adapterBase
-}
-
-func (a *tusUploadAdapter) ClearTempStorage() error {
-	// nothing to do, all temp state is on the server end
-	return nil
 }
 
 func (a *tusUploadAdapter) WorkerStarting(workerNum int) (interface{}, error) {

@@ -7,12 +7,12 @@ import (
 	"os"
 	"sync"
 
-	"github.com/git-lfs/git-lfs/config"
-	"github.com/git-lfs/git-lfs/errors"
-	"github.com/git-lfs/git-lfs/git"
-	"github.com/git-lfs/git-lfs/lfs"
-	"github.com/git-lfs/git-lfs/subprocess"
-	"github.com/git-lfs/git-lfs/tq"
+	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
+	"github.com/git-lfs/git-lfs/v3/git"
+	"github.com/git-lfs/git-lfs/v3/lfs"
+	"github.com/git-lfs/git-lfs/v3/subprocess"
+	"github.com/git-lfs/git-lfs/v3/tq"
 )
 
 // Handles the process of checking out a single file, and updating the git
@@ -67,7 +67,7 @@ func (c *singleCheckout) Run(p *lfs.WrappedPointer) {
 	// Check the content - either missing or still this pointer (not exist is ok)
 	filepointer, err := lfs.DecodePointerFromFile(cwdfilepath)
 	if err != nil && !os.IsNotExist(err) {
-		if errors.IsNotAPointerError(err) {
+		if errors.IsNotAPointerError(err) || errors.IsBadPointerKeyError(err) {
 			// File has non-pointer content, leave it alone
 			return
 		}
